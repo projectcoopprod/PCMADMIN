@@ -1,3 +1,7 @@
+const express = require("express");
+const path = require("path");
+const app = express();
+
 // =========================
 // Security Headers Middleware
 // =========================
@@ -19,3 +23,19 @@ app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 });
+
+// =========================
+// Serve Static Files
+// =========================
+app.use(express.static(path.join(__dirname, "public")));
+
+// Fallback (for SPAs, optional)
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// =========================
+// Start Server
+// =========================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

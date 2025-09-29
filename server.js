@@ -16,11 +16,10 @@ app.use((req, res, next) => {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; " +
     "img-src 'self' data:; " +
     "font-src 'self' https://fonts.gstatic.com; " +
-    "connect-src 'self' https://presidential-car-museum-default-rtdb.asia-southeast1.firebasedatabase.app https://www.gstatic.com; " +
+    "connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://presidential-car-museum-default-rtdb.asia-southeast1.firebasedatabase.app https://www.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; " +
     "frame-ancestors 'self'; " +
     "base-uri 'self'; " +
-    "form-action 'self'; " +
-    "upgrade-insecure-requests"
+    "form-action 'self'"
   );
   
   // X-Frame-Options - prevents clickjacking (DENY is more secure than SAMEORIGIN)
@@ -68,5 +67,6 @@ app.get("*", (req, res) => {
 // =========================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
 
 

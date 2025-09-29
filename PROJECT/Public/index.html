@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin Dashboard - Presidential Car Museum</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script type="module" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js"></script>
+
+  <style>
+    body {
+      background: #0f172a;
+      font-family: 'Inter', sans-serif;
+    }
+    #tab-students canvas, #tab-visitors canvas { display: none; }
+    
+    /* Loading spinner styles */
+    .loading-spinner {
+      border: 3px solid #374151;
+      border-radius: 50%;
+      border-top: 3px solid #6366f1;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body class="min-h-screen text-gray-100">
+  <!-- Login Section -->
+  <div id="login-section" class="max-w-sm mx-auto mt-24 bg-slate-900/70 backdrop-blur p-8 rounded-2xl shadow-2xl border border-slate-700">
+    <div class="text-center mb-6">
+      <img src="museum logo.png" alt="Museum Logo" class="mx-auto h-16 w-auto mb-4">
+      <h1 class="text-xl font-semibold text-gray-100">Presidential Car Museum</h1>
+    </div>
+
+
+    <h2 class="text-lg font-semibold mb-6 text-center text-indigo-400">Admin Login</h2>
+    
+    <!-- Connection Status -->
+    <div id="connection-status" class="mb-4 p-2 rounded-lg text-center text-sm">
+      <span class="text-amber-400">🔄 Connecting to database...</span>
+    </div>
+    
+    <form onsubmit="login(event)" class="space-y-4">
+      <div>
+        <label class="block mb-1 text-gray-300 font-medium">Username</label>
+        <input type="text" id="username" required
+               class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-indigo-500 outline-none" />
+      </div>
+
+      <div>
+        <label class="block mb-1 text-gray-300 font-medium">Password</label>
+        <input type="password" id="password" required
+               class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-indigo-500 outline-none" />
+      </div>
+
+      <button type="submit" id="login-btn"
+              class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg shadow-lg transition-all">
+        Login
+      </button>
+    </form>
+    <p id="login-error" class="text-red-400 mt-4 text-center hidden">Invalid credentials.</p>
+
+    <!-- Super Admin Unlock -->
+    <div class="mt-4 text-center space-y-2">
+      <button id="request-superadmin-btn"
+              class="hidden inline-flex items-center px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm"
+              onclick="requestSuperAdminUnlock()">
+        <i class="fas fa-user-shield mr-2"></i>Request Super Admin Unlock
+      </button>
+      <p id="sa-request-status" class="text-amber-300 text-sm hidden"></p>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard" class="hidden">
+    <!-- Header -->
+    <header class="bg-slate-900/70 backdrop-blur border-b border-slate-800 sticky top-0 z-50">
+      <div class="w-full flex justify-between items-center px-6 py-4">
+        <!-- Left: Logo + Title -->
+        <div class="flex items-center space-x-4">
+          <img src="museum logo.png" alt="Museum Logo" class="h-12 w-auto">
+          <h1 class="text-3xl font-bold text-white">Admin Dashboard</h1>
+        </div>
+    
+        <!-- Right: Welcome + Logout -->
+        <div class="flex items-center space-x-6">
+          <span id="welcome-label" class="text-slate-300 text-sm sm:text-base">Welcome, Admin</span>
+          <button onclick="logout()" 
+            class="flex items-center bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg transition-all">
+            <i class="fas fa-sign-out-alt mr-2"></i>Logout
+          </button>
+        </div>
+      </div>
+    </header>    
+    
+    <!-- Left Sidebar -->
+    <aside class="fixed top-[80px] left-0 bottom-0 w-64 bg-slate-900/80 backdrop-white border-r border-slate-800 z-40">
+      <div class="px-4 py-6">
+        <nav class="flex flex-col space-y-5">
+          <button onclick="showTab('home', event)" class="tab-btn bg-indigo-600 text-white hover:bg-slate-800 px-4 py-2 rounded-lg shadow-md flex items-center gap-3">
+            <i class="fa-solid fa-house"></i><span>Home</span>
+          </button>
+          <button onclick="showTab('students', event)" class="tab-btn text-slate-200 hover:bg-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
+            <i class="fa-solid fa-user-graduate"></i><span>Students</span>
+          </button>
+          <button onclick="showTab('visitors', event)" class="tab-btn text-slate-200 hover:bg-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
+            <i class="fa-solid fa-users"></i><span>Visitors</span>
+          </button>
+          <button id="btn-unlocks" onclick="showTab('unlocks', event)" class="tab-btn hidden text-slate-200 hover:bg-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
+            <i class="fa-solid fa-lock-open"></i><span>Unlock Requests</span>
+          </button>
+          <button id="btn-sessions" onclick="showTab('sessions', event)" class="tab-btn hidden text-slate-200 hover:bg-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
+            <i class="fa-solid fa-user-clock"></i><span>Admin Sessions</span>
+          </button>
+          <button id="btn-admins" onclick="showTab('admins', event)" class="tab-btn hidden text-slate-200 hover:bg-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
+            <i class="fa-solid fa-user-gear"></i><span>Manage Admins</span>
+          </button>
+          <button id="btn-settings" onclick="showTab('settings', event)" class="tab-btn hidden text-slate-200 hover:bg-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
+            <i class="fa-solid fa-cog"></i><span>Super Admin Settings</span>
+          </button>
+        </nav>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="max-w-7xl mr-auto px-6 py-8 pl-72">
+      <div class="flex gap-6">
+        <!-- Content -->
+        <section class="flex-1 space-y-8">
+
+          <!-- ==================== HOME TAB ==================== -->
+<div id="tab-home" class="tab-content">
+
+  <!-- Stats -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2">
+    <div class="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-xl p-6 shadow-lg text-center">
+      <h3 class="text-indigo-100 text-sm">Total Students</h3>
+      <p id="studentCount" class="text-4xl font-extrabold text-white mt-2">0</p>
+    </div>
+    <div class="bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-xl p-6 shadow-lg text-center">
+      <h3 class="text-emerald-100 text-sm">Total Visitors</h3>
+      <p id="visitorCount" class="text-4xl font-extrabold text-white mt-2">0</p>
+    </div>
+    <div class="bg-gradient-to-br from-purple-600 to-purple-800 rounded-xl p-6 shadow-lg text-center">
+      <h3 class="text-purple-100 text-sm">Total Visits</h3>
+      <p id="totalCount" class="text-4xl font-extrabold text-white mt-2">0</p>
+    </div>
+  </div>
+
+  <!-- Charts row -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <!-- Role Chart -->
+  <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-md overflow-hidden h-[22rem]">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-slate-100 font-semibold">Visitors by Role</h2>
+      <i class="fa-solid fa-users text-slate-400"></i>
+    </div>
+    <div class="h-[calc(100%-2.5rem)]">
+      <canvas id="roleChart" class="w-full h-full block"></canvas>
+    </div>
+  </div>
+
+  <!-- Time Chart -->
+  <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-md overflow-hidden h-[22rem]">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-slate-100 font-semibold">Visits by Time</h2>
+      <i class="fa-solid fa-clock text-slate-400"></i>
+    </div>
+    <div class="h-[calc(100%-2.5rem)]">
+      <canvas id="timeChart" class="w-full h-full block"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Weekly Chart (full width at bottom) -->
+<div class="bg-slate-900/60 border border-slate-800 rounded-xl p-6 shadow-md overflow-hidden h-[26rem] mt-6">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-slate-100 font-semibold">Visits Per Week</h2>
+    <i class="fa-solid fa-calendar-week text-slate-400"></i>
+  </div>
+  <div class="h-[calc(100%-2.5rem)]">
+    <canvas id="dateChart" class="w-full h-full block"></canvas>
+  </div>
+</div>
+</div>
+<!-- ================== END HOME TAB ================== -->
+
+<!-- ==================== STUDENTS TAB ==================== -->
+<div id="tab-students" class="tab-content hidden">
+  <div class="bg-slate-900/60 rounded-xl shadow-lg border border-slate-800 overflow-hidden">
+    <div class="bg-gradient-to-r from-indigo-500 to-indigo-700 px-6 py-4">
+      <h2 class="text-lg font-bold text-white">Student Visitors</h2>
+    </div>
+    <div class="p-6 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-800/80">
+          <tr>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Nickname</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Location</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Visit Time</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Date</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Action</th>
+          </tr>
+        </thead>
+        <tbody id="student-table-body" class="divide-y divide-slate-800 text-slate-100">
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<!-- ================== END STUDENTS TAB ================== -->
+
+<!-- ==================== VISITORS TAB ==================== -->
+<div id="tab-visitors" class="tab-content hidden">
+  <div class="bg-slate-900/60 rounded-xl shadow-lg border border-slate-800 overflow-hidden">
+    <div class="bg-gradient-to-r from-emerald-500 to-emerald-700 px-6 py-4">
+      <h2 class="text-lg font-bold text-white">General Visitors</h2>
+    </div>
+    <div class="p-6 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-800/80">
+          <tr>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Nickname</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Location</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Visit Time</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Date</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Action</th>
+          </tr>
+        </thead>
+        <tbody id="visitor-table-body" class="divide-y divide-slate-800 text-slate-100">
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<!-- ================== END VISITORS TAB ================== -->
+
+<!-- ==================== MANAGE ADMINS TAB (Super Admin) ==================== -->
+<div id="tab-admins" class="tab-content hidden">
+  <div class="bg-slate-900/60 rounded-xl shadow-lg border border-slate-800 overflow-hidden">
+    <div class="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-4 flex items-center justify-between">
+      <h2 class="text-lg font-bold text-white">Manage Admin Accounts</h2>
+    </div>
+    <div class="p-6 space-y-6">
+      <form id="create-admin-form" onsubmit="createAdmin(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+        <div>
+          <label class="block mb-1 text-gray-300 font-medium">Username</label>
+          <input type="text" id="new-admin-username" required class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-indigo-500 outline-none" />
+        </div>
+        <div>
+          <label class="block mb-1 text-gray-300 font-medium">Password</label>
+          <input type="password" id="new-admin-password" required class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-indigo-500 outline-none" />
+        </div>
+        <div>
+          <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg">Create Admin</button>
+        </div>
+      </form>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-800/80">
+            <tr>
+              <th class="text-left py-3 px-6 font-semibold text-slate-100">Username</th>
+              <th class="text-left py-3 px-6 font-semibold text-slate-100">Created</th>
+              <th class="text-left py-3 px-6 font-semibold text-slate-100">Action</th>
+            </tr>
+          </thead>
+          <tbody id="admins-table-body" class="divide-y divide-slate-800 text-slate-100"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <p class="text-xs text-slate-400 mt-2 px-1">Note: Super Admin can manage admins only. Passwords are stored in plain text for simplicity. Consider hashing in production.</p>
+  
+</div>
+<!-- ================== END MANAGE ADMINS TAB ================== -->
+
+<!-- ==================== SUPER ADMIN SETTINGS TAB ==================== -->
+<div id="tab-settings" class="tab-content hidden">
+  <div class="bg-slate-900/60 rounded-xl shadow-lg border border-slate-800 overflow-hidden">
+    <div class="bg-gradient-to-r from-purple-600 to-purple-800 px-6 py-4">
+      <h2 class="text-lg font-bold text-white">Super Admin Settings</h2>
+    </div>
+    <div class="p-6 space-y-6">
+      <!-- Change Username -->
+      <div class="bg-slate-800/50 rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
+          <i class="fas fa-user-edit mr-3 text-purple-400"></i>Change Username
+        </h3>
+        <form id="change-username-form" onsubmit="changeSuperAdminUsername(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label class="block mb-1 text-gray-300 font-medium">Current Username</label>
+            <input type="text" id="current-username" readonly class="w-full border border-slate-700 bg-slate-700 rounded-lg px-3 py-2 text-gray-300" />
+          </div>
+          <div>
+            <label class="block mb-1 text-gray-300 font-medium">New Username</label>
+            <input type="text" id="new-username" required class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none" />
+          </div>
+          <div>
+            <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg">Change Username</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Change Password -->
+      <div class="bg-slate-800/50 rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
+          <i class="fas fa-key mr-3 text-purple-400"></i>Change Password
+        </h3>
+        <form id="change-password-form" onsubmit="changeSuperAdminPassword(event)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block mb-1 text-gray-300 font-medium">Current Password</label>
+            <input type="password" id="current-password" required class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none" />
+          </div>
+          <div>
+            <label class="block mb-1 text-gray-300 font-medium">New Password</label>
+            <input type="password" id="new-password" required class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none" />
+          </div>
+          <div>
+            <label class="block mb-1 text-gray-300 font-medium">Confirm New Password</label>
+            <input type="password" id="confirm-password" required class="w-full border border-slate-700 bg-slate-800 rounded-lg px-3 py-2 text-gray-100 focus:ring-2 focus:ring-purple-500 outline-none" />
+          </div>
+          <div class="flex items-end">
+            <button type="submit" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg">Change Password</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Current Account Info -->
+      <div class="bg-slate-800/50 rounded-lg p-6">
+        <h3 class="text-lg font-semibold text-white mb-4 flex items-center">
+          <i class="fas fa-info-circle mr-3 text-purple-400"></i>Account Information
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div>
+            <span class="text-gray-400">Current Username:</span>
+            <span id="display-username" class="text-white ml-2 font-mono"></span>
+          </div>
+          <div>
+            <span class="text-gray-400">Account Created:</span>
+            <span id="display-created" class="text-white ml-2"></span>
+          </div>
+          <div>
+            <span class="text-gray-400">Last Updated:</span>
+            <span id="display-updated" class="text-white ml-2"></span>
+          </div>
+          <div>
+            <span class="text-gray-400">Account Type:</span>
+            <span class="text-purple-400 ml-2 font-semibold">Super Administrator</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="text-xs text-slate-400 mt-2 px-1">Note: Changes take effect immediately. You will need to log in again with your new credentials.</p>
+</div>
+<!-- ================== END SUPER ADMIN SETTINGS TAB ================== -->
+
+<!-- ==================== UNLOCK REQUESTS TAB (Super Admin) ==================== -->
+<div id="tab-unlocks" class="tab-content hidden">
+  <div class="bg-slate-900/60 rounded-xl shadow-lg border border-slate-800 overflow-hidden">
+    <div class="bg-gradient-to-r from-amber-500 to-amber-700 px-6 py-4">
+      <h2 class="text-lg font-bold text-white">Unlock Requests</h2>
+    </div>
+    <div class="p-6 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-800/80">
+          <tr>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Request ID</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Client</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Username</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Requested At</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Status</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Action</th>
+          </tr>
+        </thead>
+        <tbody id="unlock-req-table-body" class="divide-y divide-slate-800 text-slate-100"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== ADMIN SESSIONS TAB (Super Admin) ==================== -->
+<div id="tab-sessions" class="tab-content hidden">
+  <div class="bg-slate-900/60 rounded-xl shadow-lg border border-slate-800 overflow-hidden">
+    <div class="bg-gradient-to-r from-indigo-500 to-indigo-700 px-6 py-4">
+      <h2 class="text-lg font-bold text-white">Admin Sessions</h2>
+    </div>
+    <div class="p-6 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-800/80">
+          <tr>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Session ID</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Username</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Time In</th>
+            <th class="text-left py-3 px-6 font-semibold text-slate-100">Time Out</th>
+          </tr>
+        </thead>
+        <tbody id="admin-session-table-body" class="divide-y divide-slate-800 text-slate-100"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+  <script type="module" src="main.js"></script>
+
+</body>
+</html>

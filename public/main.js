@@ -651,6 +651,11 @@ function populateAdminSessions(data) {
     return;
   }
   
+  if (newUsername === currentUsername) {
+    alert('New username is the same as current username');
+    return;
+  }
+  
   try {
     // Get current superadmin data
     const saSnap = await get(superAdminRef);
@@ -661,11 +666,14 @@ function populateAdminSessions(data) {
     
     const currentData = saSnap.val();
     
-    // Update username
+    // Update username while preserving other data
     await update(superAdminRef, {
       username: newUsername,
       updatedAt: Date.now()
     });
+    
+    // Update current username
+    currentUsername = newUsername;
     
     alert(`Username changed successfully to "${newUsername}". You will need to log in again.`);
     
@@ -674,7 +682,6 @@ function populateAdminSessions(data) {
     
     // Update display
     updateSuperAdminDisplay();
-    startInactivityTimer();
     
     // Logout after 2 seconds
     setTimeout(() => {
@@ -682,8 +689,8 @@ function populateAdminSessions(data) {
     }, 2000);
     
   } catch (e) {
-    console.error(e);
-    alert('Failed to change username');
+    console.error('Username change error:', e);
+    alert('Failed to change username: ' + e.message);
   }
 }
 
@@ -942,4 +949,5 @@ async function createAdmin(event) {
 
 // Expose to window for HTML onclick
 window.createAdmin = createAdmin;
+
 

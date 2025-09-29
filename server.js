@@ -8,7 +8,7 @@ const app = express();
 app.use((req, res, next) => {
   res.setHeader("Content-Security-Policy",
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://www.gstatic.com https://fonts.googleapis.com https://cdnjs.cloudflare.com https://www.googleapis.com; " +
+    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://www.gstatic.com https://fonts.googleapis.com https://cdnjs.cloudflare.com https://www.googleapis.com https://presidential-car-museum-default-rtdb.asia-southeast1.firebasedatabase.app; " +
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; " +
     "img-src 'self' data: blob:; " +
     "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; " +

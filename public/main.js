@@ -719,19 +719,22 @@ async function changeSuperAdminPassword(event) {
     }
     
     const currentData = saSnap.val();
-    const currentHash = (currentData?.passwordHash || '').trim().toLowerCase();
+    const storedHash = currentData?.passwordHash || currentData?.password || '';
     
-    // Verify current password
-    const inputHash = (await sha256(currentPassword)).toLowerCase();
-    if (inputHash !== currentHash) {
+    // Verify current password - check both hashed and plain
+    const inputHash = await sha256(currentPassword);
+    const isMatch = (inputHash === storedHash) || (currentPassword === storedHash);
+    
+    if (!isMatch) {
       alert('Current password is incorrect');
       return;
     }
     
-    // Update password
-    const newHash = (await sha256(newPassword)).toLowerCase();
+    // Update password with new hash
+    const newHash = await sha256(newPassword);
     await update(superAdminRef, {
       passwordHash: newHash,
+      password: null, // Remove plain password if it exists
       updatedAt: Date.now()
     });
     
@@ -742,18 +745,14 @@ async function changeSuperAdminPassword(event) {
     document.getElementById('new-password').value = '';
     document.getElementById('confirm-password').value = '';
     
-    // Update display
-    updateSuperAdminDisplay();
-    startInactivityTimer();
-    
     // Logout after 2 seconds
     setTimeout(() => {
       logout();
     }, 2000);
     
   } catch (e) {
-    console.error(e);
-    alert('Failed to change password');
+    console.error('Password change error:', e);
+    alert('Failed to change password: ' + e.message);
   }
 }
 
@@ -943,3 +942,4 @@ async function createAdmin(event) {
 
 // Expose to window for HTML onclick
 window.createAdmin = createAdmin;
+

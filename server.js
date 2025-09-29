@@ -6,72 +6,53 @@ const app = express();
 // Security Headers Middleware
 // =========================
 app.use((req, res, next) => {
-  // Content Security Policy - More specific and secure
   res.setHeader("Content-Security-Policy",
     "default-src 'self'; " +
     
-    // Scripts: Allow Firebase, Tailwind, and necessary CDNs
-    "script-src 'self' 'unsafe-inline' " +
+    // Scripts - Add missing CDNs
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' " +
     "https://cdn.tailwindcss.com " +
-    "https://unpkg.com/scrollreveal@4.0.9/ " +
-    "https://www.gstatic.com/firebasejs/ " +
-    "https://cdnjs.cloudflare.com/ajax/libs/; " +
+    "https://unpkg.com " +
+    "https://cdn.jsdelivr.net " +  // ADDED - for Chart.js
+    "https://www.gstatic.com " +
+    "https://cdnjs.cloudflare.com; " +
     
-    // Styles: Limited to necessary sources
+    // Styles - Add Google Fonts
     "style-src 'self' 'unsafe-inline' " +
     "https://cdn.tailwindcss.com " +
-    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/; " +
+    "https://fonts.googleapis.com " +  // ADDED - for Google Fonts
+    "https://cdnjs.cloudflare.com; " +
     
-    // Images: Allow external images and maps
+    // Images
     "img-src 'self' data: https: blob:; " +
     
-    // Fonts: FontAwesome and other CDN fonts
+    // Fonts - Add Google Fonts
     "font-src 'self' data: " +
-    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/; " +
+    "https://fonts.gstatic.com " +  // ADDED - for Google Fonts files
+    "https://cdnjs.cloudflare.com; " +
     
-    // Connect: Firebase databases and APIs - INCLUDES WSS for WebSockets
+    // Connect - Firebase WebSockets
     "connect-src 'self' " +
     "https://*.firebaseio.com " +
     "https://*.firebasedatabase.app " +
-    "wss://*.firebasedatabase.app " +  // Critical for Firebase Realtime DB
+    "wss://*.firebasedatabase.app " +
     "https://*.googleapis.com " +
-    "https://www.gstatic.com " +
-    "https://identitytoolkit.googleapis.com " +
-    "https://securetoken.googleapis.com; " +
+    "https://www.gstatic.com; " +
     
-    // Frames: Google Maps embed
-    "frame-src 'self' https://www.google.com/maps/; " +
+    // Frames
+    "frame-src 'self' https://www.google.com; " +
     
-    // Prevent your site from being framed by others
-    "frame-ancestors 'none'; " +
-    
-    // Restrict base URL and form submissions
+    "frame-ancestors 'self'; " +
     "base-uri 'self'; " +
     "form-action 'self'; " +
-    
-    // Block all object/embed tags (Flash, etc.)
-    "object-src 'none'; " +
-    
-    // Only load media from self
-    "media-src 'self'; " +
-    
-    // Upgrade insecure requests to HTTPS
-    "upgrade-insecure-requests;"
+    "object-src 'none';"
   );
 
-  // Additional Security Headers
-  res.setHeader("X-Frame-Options", "DENY"); // Stronger than SAMEORIGIN
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", 
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
-  );
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
   
-  // HSTS - Force HTTPS (only enable if you have SSL)
-  // Uncomment when you have HTTPS configured on Render:
-  // res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
-  
-  // Remove identifying headers
   app.disable('x-powered-by');
   
   next();
@@ -80,31 +61,13 @@ app.use((req, res, next) => {
 // =========================
 // Serve Static Files
 // =========================
-app.use(express.static(path.join(__dirname, "public"), {
-  maxAge: '1d', // Cache static files for 1 day
-  etag: true,
-  lastModified: true
-}));
+app.use(express.static(path.join(__dirname, "public")));
 
 // =========================
 // Routes
 // =========================
-// Health check endpoint (useful for Render)
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
-
-// Fallback route
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// =========================
-// Error Handling
-// =========================
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).send('Something broke!');
 });
 
 // =========================
@@ -112,5 +75,5 @@ app.use((err, req, res, next) => {
 // =========================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });

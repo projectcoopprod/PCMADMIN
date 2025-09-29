@@ -884,4 +884,62 @@ function startInactivityTimer() {
 // Stop timer on logout
 function stopInactivityTimer() {
   clearTimeout(inactivityTimeout);
+
 }
+
+// ====================== CREATE ADMIN FUNCTION ======================
+async function createAdmin(event) {
+  event.preventDefault();
+  
+  if (!isSuperAdmin) {
+    alert('Only Super Admin can create admin accounts.');
+    return;
+  }
+  
+  const username = document.getElementById('new-admin-username').value.trim();
+  const password = document.getElementById('new-admin-password').value.trim();
+  
+  if (!username || !password) {
+    alert('Please enter both username and password');
+    return;
+  }
+  
+  if (username.toLowerCase() === 'superadmin') {
+    alert('Cannot use "superadmin" as username');
+    return;
+  }
+  
+  try {
+    // Check if admin already exists
+    const adminSnap = await get(child(adminsRef, username));
+    if (adminSnap.exists()) {
+      alert(`Admin '${username}' already exists`);
+      return;
+    }
+    
+    // Hash the password
+    const passwordHash = await sha256(password);
+    
+    // Create new admin
+    await set(ref(db, `admins/${username}`), {
+      passwordHash: passwordHash,
+      createdAt: Date.now()
+    });
+    
+    alert(`Admin '${username}' created successfully`);
+    
+    // Clear form
+    document.getElementById('new-admin-username').value = '';
+    document.getElementById('new-admin-password').value = '';
+    
+    // Reset inactivity timer since this was user activity
+    startInactivityTimer();
+    
+  } catch (e) {
+    console.error('Failed to create admin:', e);
+    alert('Failed to create admin: ' + e.message);
+  }
+}
+
+// Expose to window for HTML onclick
+window.createAdmin = createAdmin;

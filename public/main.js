@@ -40,6 +40,7 @@ let isAuthenticated = false;
 let isAppReady = false;
 let isSuperAdmin = false;
 let currentUsername = null;
+let currentAdminSessionKey = null;
 let roleChartInstance = null;
 let timeChartInstance = null;
 let dateChartInstance = null;
@@ -147,70 +148,131 @@ async function login(event) {
     const saPass = saData?.password || saData?.passwordHash;
     const isSaMatch = saData && saData.username === username && (saPass === hashed || saPass === password);
     
-   // For Super Admin login success (around line 170)
-if (isSaMatch) {
-  loginAttempts = 0;
-  loginLockoutUntil = null;
-  isSuperAdmin = true;
-  currentUsername = username;
-  
-  // CREATE ADMIN SESSION
-  try {
-    const sessionRef = push(adminSessionsRef);
-    await set(sessionRef, {
-      username: username,
-      role: 'Super Admin',
-      timeIn: Date.now(),
-      timeOut: null
-    });
-    currentAdminSessionKey = sessionRef.key;
-  } catch (e) {
-    console.error('Failed to create session:', e);
-  }
-  
-  document.getElementById("login-section").classList.add("hidden");
-  document.getElementById("dashboard").classList.remove("hidden");
-  document.getElementById("btn-unlocks").classList.remove("hidden");
-  document.getElementById("btn-sessions").classList.remove("hidden");
-  document.getElementById("btn-admins").classList.remove("hidden");
-  document.getElementById("btn-settings").classList.remove("hidden");
-  document.getElementById("welcome-label").textContent = `Welcome, Super Admin`;
-  updateSuperAdminDisplay();
-  startInactivityTimer();
-  return;
-}
+    if (isSaMatch) {
+      loginAttempts = 0;
+      loginLockoutUntil = null;
+      isSuperAdmin = true;
+      currentUsername = username;
+      
+      try {
+        const sessionRef = push(adminSessionsRef);
+        await set(sessionRef, {
+          username: username,
+          role: 'Super Admin',
+          timeIn: Date.now(),
+          timeOut: null
+        });
+        currentAdminSessionKey = sessionRef.key;
+      } catch (e) {
+        console.error('Failed to create session:', e);
+      }
+      
+      document.getElementById("login-section").classList.add("hidden");
+      document.getElementById("dashboard").classList.remove("hidden");
+      document.getElementById("btn-unlocks").classList.remove("hidden");
+      document.getElementById("btn-sessions").classList.remove("hidden");
+      document.getElementById("btn-admins").classList.remove("hidden");
+      document.getElementById("btn-settings").classList.remove("hidden");
+      document.getElementById("welcome-label").textContent = `Welcome, Super Admin`;
+      updateSuperAdminDisplay();
+      startInactivityTimer();
+      return;
+    }
 
-// For Regular Admin login success (around line 195)
-if (isAdminMatch) {
-  loginAttempts = 0;
-  loginLockoutUntil = null;
-  currentUsername = usernameKey;
-  
-  // CREATE ADMIN SESSION
-  try {
-    const sessionRef = push(adminSessionsRef);
-    await set(sessionRef, {
-      username: usernameKey,
-      role: 'Admin',
-      timeIn: Date.now(),
-      timeOut: null
-    });
-    currentAdminSessionKey = sessionRef.key;
-  } catch (e) {
-    console.error('Failed to create session:', e);
+    const adminSnap = await get(adminsRef);
+    const admins = adminSnap.val() || {};
+    const usernameKey = Object.keys(admins).find(k => k.toLowerCase() === username.toLowerCase());
+    const adminRecord = usernameKey ? admins[usernameKey] : undefined;
+    const adminPass = adminRecord?.passwordHash || adminRecord?.password;
+    const isAdminMatch = adminRecord && (adminPass === hashed || adminPass === password);
+    
+    if (isAdminMatch) {
+      loginAttempts = 0;
+      loginLockoutUntil = null;
+      currentUsername = usernameKey;
+      
+      try {
+        const sessionRef = push(adminSessionsRef);
+        await set(sessionRef, {
+          username: usernameKey,
+          role: 'Admin',
+          timeIn: Date.now(),
+          timeOut: null
+        });
+        currentAdminSessionKey = sessionRef.key;
+      } catch (e) {
+        console.error('Failed to create session:', e);
+      }
+      
+      document.getElementById("login-section").classList.add("hidden");
+      document.getElementById("dashboard").classList.remove("hidden");
+      document.getElementById("welcome-label").textContent = `Welcome, Admin ${usernameKey}`;
+      updateSuperAdminDisplay();
+      startInactivityTimer();
+      return;
+    }
+
+    loginAttempts++;
+
+    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+      loginLockoutUntil = Date.now() + LOCKOUT_DURATION;
+      errorEl.textContent = `Too many failed attempts. Locked out for 30 seconds.`;
+      
+      const unlockBtn = document.getElementById("request-superadmin-btn");
+      if (unlockBtn) unlockBtn.classList.remove("hidden");
+      
+      try {
+        const newReqRef = push(unlockReqsRef);
+        await set(newReqRef, {
+          username: username,
+          client: 'Web Admin - Failed Login',
+          requestedAt: Date.now(),
+          status: 'Pending',
+          attemptCount: loginAttempts
+        });
+        
+        const statusEl = document.getElementById('sa-request-status');
+        if (statusEl) {
+          statusEl.textContent = 'Unlock request sent to Super Admin.';
+          statusEl.classList.remove('hidden');
+        }
+      } catch (e) {
+        console.error('Failed to create unlock request:', e);
+      }
+      
+      const countdownInterval = setInterval(() => {
+        if (Date.now() >= loginLockoutUntil) {
+          clearInterval(countdownInterval);
+          loginAttempts = 0;
+          loginLockoutUntil = null;
+          errorEl.textContent = 'You can try logging in again.';
+          errorEl.classList.add('bg-green-900', 'text-green-200');
+          setTimeout(() => {
+            errorEl.classList.add("hidden");
+            errorEl.classList.remove('bg-green-900', 'text-green-200');
+          }, 3000);
+        } else {
+          const remainingSeconds = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
+          errorEl.textContent = `Too many failed attempts. Please wait ${remainingSeconds} seconds.`;
+        }
+      }, 1000);
+      
+    } else {
+      const attemptsLeft = MAX_LOGIN_ATTEMPTS - loginAttempts;
+      errorEl.textContent = `Invalid credentials. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`;
+    }
+
+    errorEl.classList.remove("hidden");
+
+  } catch (err) {
+    console.error("Login error:", err);
+    errorEl.textContent = "Login failed. Try again.";
+    errorEl.classList.remove("hidden");
   }
-  
-  document.getElementById("login-section").classList.add("hidden");
-  document.getElementById("dashboard").classList.remove("hidden");
-  document.getElementById("welcome-label").textContent = `Welcome, Admin ${usernameKey}`;
-  updateSuperAdminDisplay();
-  startInactivityTimer();
-  return;
 }
 
 async function logout() {
   try {
-    // Update session timeOut before logging out
     if (currentAdminSessionKey) {
       try {
         await update(ref(db, `admin_sessions/${currentAdminSessionKey}`), {
@@ -244,8 +306,6 @@ async function logout() {
     console.error('logout error:', e);
   }
 }
-
-let currentAdminSessionKey = null;
 
 // ============================================================
 // Firebase Authentication
@@ -732,255 +792,254 @@ async function changeSuperAdminUsername(event) {
       username: newUsername,
       passwordHash: currentData.passwordHash || currentData.password,
       createdAt: currentData.createdAt || Date.now(),
-      updatedAt: Date.now
-    });
+      updatedAt: Date.now()});
     
-    console.log('Username updated in database to:', newUsername);
-    alert(`Username changed successfully to "${newUsername}". You will be logged out.`);
-    
-    document.getElementById('new-username').value = '';
-    setTimeout(() => logout(), 2000);
-    
-  } catch (e) {
-    console.error('Username change error:', e);
-    alert('Failed to change username: ' + e.message);
-    startInactivityTimer();
-  }
-}
-
-async function changeSuperAdminPassword(event) {
-  event.preventDefault();
-  if (!requireSuperAdmin()) return;
-  
-  const currentPassword = document.getElementById('current-password').value;
-  const newPassword = document.getElementById('new-password').value;
-  const confirmPassword = document.getElementById('confirm-password').value;
-  
-  if (!currentPassword || !newPassword || !confirmPassword) {
-    alert('Please fill in all password fields');
-    return;
-  }
-  
-  if (newPassword !== confirmPassword) {
-    alert('New passwords do not match');
-    return;
-  }
-  
-  if (newPassword.length < 6) {
-    alert('New password must be at least 6 characters long');
-    return;
-  }
-  
-  try {
-    stopInactivityTimer();
-    
-    const saSnap = await get(superAdminRef);
-    if (!saSnap.exists()) {
-      alert('Superadmin account not found');
+      console.log('Username updated in database to:', newUsername);
+      alert(`Username changed successfully to "${newUsername}". You will be logged out.`);
+      
+      document.getElementById('new-username').value = '';
+      setTimeout(() => logout(), 2000);
+      
+    } catch (e) {
+      console.error('Username change error:', e);
+      alert('Failed to change username: ' + e.message);
       startInactivityTimer();
+    }
+  }
+  
+  async function changeSuperAdminPassword(event) {
+    event.preventDefault();
+    if (!requireSuperAdmin()) return;
+    
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+    
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      alert('Please fill in all password fields');
       return;
     }
     
-    const currentData = saSnap.val();
-    const storedHash = currentData?.passwordHash || currentData?.password || '';
-    
-    const inputHash = await sha256(currentPassword);
-    const isMatch = (inputHash === storedHash) || (currentPassword === storedHash);
-    
-    if (!isMatch) {
-      alert('Current password is incorrect');
-      startInactivityTimer();
+    if (newPassword !== confirmPassword) {
+      alert('New passwords do not match');
       return;
     }
     
-    const newHash = await sha256(newPassword);
-    
-    await set(superAdminRef, {
-      username: currentData.username,
-      passwordHash: newHash,
-      createdAt: currentData.createdAt || Date.now(),
-      updatedAt: Date.now()
-    });
-    
-    console.log('Password updated in database');
-    alert('Password changed successfully. You will be logged out.');
-    
-    document.getElementById('current-password').value = '';
-    document.getElementById('new-password').value = '';
-    document.getElementById('confirm-password').value = '';
-    
-    setTimeout(() => logout(), 2000);
-    
-  } catch (e) {
-    console.error('Password change error:', e);
-    alert('Failed to change password: ' + e.message);
-    startInactivityTimer();
-  }
-}
-
-async function approveUnlockRequest(reqId) {
-  if (!requireSuperAdmin()) return;
-  if (!reqId) return;
-  
-  try {
-    stopInactivityTimer();
-    
-    await set(ref(db, `unlock_requests/${reqId}`), { 
-      status: 'Approved',
-      approvedAt: Date.now(),
-      approvedBy: currentUsername
-    });
-    
-    console.log('Unlock request approved:', reqId);
-    alert(`Unlock request '${reqId}' approved successfully.`);
-    
-    startInactivityTimer();
-  } catch (e) {
-    console.error('Failed to approve unlock request:', e);
-    alert('Failed to approve: ' + e.message);
-    startInactivityTimer();
-  }
-}
-
-async function rejectUnlockRequest(reqId) {
-  if (!requireSuperAdmin()) return;
-  if (!reqId) return;
-  
-  try {
-    stopInactivityTimer();
-    
-    await set(ref(db, `unlock_requests/${reqId}`), { 
-      status: 'Rejected',
-      rejectedAt: Date.now(),
-      rejectedBy: currentUsername
-    });
-    
-    console.log('Unlock request rejected:', reqId);
-    alert(`Unlock request '${reqId}' rejected successfully.`);
-    
-    startInactivityTimer();
-  } catch (e) {
-    console.error('Failed to reject:', e);
-    alert('Failed to reject: ' + e.message);
-    startInactivityTimer();
-  }
-}
-
-async function requestSuperAdminUnlock() {
-  const username = document.getElementById('username').value.trim();
-  if (!username) {
-    alert('Please enter your username first');
-    return;
-  }
-  
-  try {
-    const newReqRef = push(unlockReqsRef);
-    await set(newReqRef, {
-      username: username,
-      client: 'Web Admin',
-      requestedAt: Date.now(),
-      status: 'Pending'
-    });
-    
-    const statusEl = document.getElementById('sa-request-status');
-    if (statusEl) {
-      statusEl.textContent = 'Unlock request sent. Please wait for Super Admin approval.';
-      statusEl.classList.remove('hidden');
+    if (newPassword.length < 6) {
+      alert('New password must be at least 6 characters long');
+      return;
     }
     
-  } catch (e) {
-    console.error('Failed to request unlock:', e);
-    alert('Failed to send unlock request.');
+    try {
+      stopInactivityTimer();
+      
+      const saSnap = await get(superAdminRef);
+      if (!saSnap.exists()) {
+        alert('Superadmin account not found');
+        startInactivityTimer();
+        return;
+      }
+      
+      const currentData = saSnap.val();
+      const storedHash = currentData?.passwordHash || currentData?.password || '';
+      
+      const inputHash = await sha256(currentPassword);
+      const isMatch = (inputHash === storedHash) || (currentPassword === storedHash);
+      
+      if (!isMatch) {
+        alert('Current password is incorrect');
+        startInactivityTimer();
+        return;
+      }
+      
+      const newHash = await sha256(newPassword);
+      
+      await set(superAdminRef, {
+        username: currentData.username,
+        passwordHash: newHash,
+        createdAt: currentData.createdAt || Date.now(),
+        updatedAt: Date.now()
+      });
+      
+      console.log('Password updated in database');
+      alert('Password changed successfully. You will be logged out.');
+      
+      document.getElementById('current-password').value = '';
+      document.getElementById('new-password').value = '';
+      document.getElementById('confirm-password').value = '';
+      
+      setTimeout(() => logout(), 2000);
+      
+    } catch (e) {
+      console.error('Password change error:', e);
+      alert('Failed to change password: ' + e.message);
+      startInactivityTimer();
+    }
   }
-}
-
-async function deleteStudent(studentId) {
-  if (!isAuthenticated) {
-    alert('You must be logged in to delete students.');
-    return;
-  }
-  if (!studentId) return;
   
-  try {
-    stopInactivityTimer();
-    await remove(ref(db, `students/${studentId}`));
-    alert('Student deleted successfully.');
-    startInactivityTimer();
-  } catch (e) {
-    console.error('Failed to delete student:', e);
-    alert('Failed to delete student.');
-    startInactivityTimer();
+  async function approveUnlockRequest(reqId) {
+    if (!requireSuperAdmin()) return;
+    if (!reqId) return;
+    
+    try {
+      stopInactivityTimer();
+      
+      await set(ref(db, `unlock_requests/${reqId}`), { 
+        status: 'Approved',
+        approvedAt: Date.now(),
+        approvedBy: currentUsername
+      });
+      
+      console.log('Unlock request approved:', reqId);
+      alert(`Unlock request '${reqId}' approved successfully.`);
+      
+      startInactivityTimer();
+    } catch (e) {
+      console.error('Failed to approve unlock request:', e);
+      alert('Failed to approve: ' + e.message);
+      startInactivityTimer();
+    }
   }
-}
-
-async function deleteVisitor(visitorId) {
-  if (!isAuthenticated) {
-    alert('You must be logged in to delete visitors.');
-    return;
-  }
-  if (!visitorId) return;
   
-  try {
-    stopInactivityTimer();
-    await remove(ref(db, `visitors/${visitorId}`));
-    alert('Visitor deleted successfully.');
-    startInactivityTimer();
-  } catch (e) {
-    console.error('Failed to delete visitor:', e);
-    alert('Failed to delete visitor.');
-    startInactivityTimer();
+  async function rejectUnlockRequest(reqId) {
+    if (!requireSuperAdmin()) return;
+    if (!reqId) return;
+    
+    try {
+      stopInactivityTimer();
+      
+      await set(ref(db, `unlock_requests/${reqId}`), { 
+        status: 'Rejected',
+        rejectedAt: Date.now(),
+        rejectedBy: currentUsername
+      });
+      
+      console.log('Unlock request rejected:', reqId);
+      alert(`Unlock request '${reqId}' rejected successfully.`);
+      
+      startInactivityTimer();
+    } catch (e) {
+      console.error('Failed to reject:', e);
+      alert('Failed to reject: ' + e.message);
+      startInactivityTimer();
+    }
   }
-}
-
-function updateSuperAdminDisplay() {
-  const usernameEl = document.getElementById('display-username');
-  if (usernameEl) {
-    usernameEl.textContent = currentUsername || '';
+  
+  async function requestSuperAdminUnlock() {
+    const username = document.getElementById('username').value.trim();
+    if (!username) {
+      alert('Please enter your username first');
+      return;
+    }
+    
+    try {
+      const newReqRef = push(unlockReqsRef);
+      await set(newReqRef, {
+        username: username,
+        client: 'Web Admin',
+        requestedAt: Date.now(),
+        status: 'Pending'
+      });
+      
+      const statusEl = document.getElementById('sa-request-status');
+      if (statusEl) {
+        statusEl.textContent = 'Unlock request sent. Please wait for Super Admin approval.';
+        statusEl.classList.remove('hidden');
+      }
+      
+    } catch (e) {
+      console.error('Failed to request unlock:', e);
+      alert('Failed to send unlock request.');
+    }
   }
-  const currentUsernameInput = document.getElementById('current-username');
-  if (currentUsernameInput) {
-    currentUsernameInput.value = currentUsername || '';
+  
+  async function deleteStudent(studentId) {
+    if (!isAuthenticated) {
+      alert('You must be logged in to delete students.');
+      return;
+    }
+    if (!studentId) return;
+    
+    try {
+      stopInactivityTimer();
+      await remove(ref(db, `students/${studentId}`));
+      alert('Student deleted successfully.');
+      startInactivityTimer();
+    } catch (e) {
+      console.error('Failed to delete student:', e);
+      alert('Failed to delete student.');
+      startInactivityTimer();
+    }
   }
-}
-
-// ============================================================
-// Inactivity Timer
-// ============================================================
-let inactivityTimeout = null;
-
-function getAutoLogoutDuration() {
-  return isSuperAdmin ? 4000 : 30000;
-}
-
-function resetInactivityTimer() {
-  clearTimeout(inactivityTimeout);
-  if (isAuthenticated) {
-    inactivityTimeout = setTimeout(() => {
-      alert('Session expired due to inactivity. You will be logged out.');
-      logout();
-    }, getAutoLogoutDuration());
+  
+  async function deleteVisitor(visitorId) {
+    if (!isAuthenticated) {
+      alert('You must be logged in to delete visitors.');
+      return;
+    }
+    if (!visitorId) return;
+    
+    try {
+      stopInactivityTimer();
+      await remove(ref(db, `visitors/${visitorId}`));
+      alert('Visitor deleted successfully.');
+      startInactivityTimer();
+    } catch (e) {
+      console.error('Failed to delete visitor:', e);
+      alert('Failed to delete visitor.');
+      startInactivityTimer();
+    }
   }
-}
-
-function startInactivityTimer() {
-  resetInactivityTimer();
-}
-
-function stopInactivityTimer() {
-  clearTimeout(inactivityTimeout);
-}
-
-['mousemove', 'keydown', 'mousedown', 'touchstart'].forEach(evt => {
-  window.addEventListener(evt, resetInactivityTimer, true);
-});
-
-// ============================================================
-// Expose to Window
-// ============================================================
-window.login = login;
-window.logout = logout;
-window.showTab = showTab;
-window.createAdmin = createAdmin;
-window.changeSuperAdminUsername = changeSuperAdminUsername;
-window.changeSuperAdminPassword = changeSuperAdminPassword;
-window.requestSuperAdminUnlock = requestSuperAdminUnlock;
+  
+  function updateSuperAdminDisplay() {
+    const usernameEl = document.getElementById('display-username');
+    if (usernameEl) {
+      usernameEl.textContent = currentUsername || '';
+    }
+    const currentUsernameInput = document.getElementById('current-username');
+    if (currentUsernameInput) {
+      currentUsernameInput.value = currentUsername || '';
+    }
+  }
+  
+  // ============================================================
+  // Inactivity Timer
+  // ============================================================
+  let inactivityTimeout = null;
+  
+  function getAutoLogoutDuration() {
+    return isSuperAdmin ? 4000 : 30000;
+  }
+  
+  function resetInactivityTimer() {
+    clearTimeout(inactivityTimeout);
+    if (isAuthenticated) {
+      inactivityTimeout = setTimeout(() => {
+        alert('Session expired due to inactivity. You will be logged out.');
+        logout();
+      }, getAutoLogoutDuration());
+    }
+  }
+  
+  function startInactivityTimer() {
+    resetInactivityTimer();
+  }
+  
+  function stopInactivityTimer() {
+    clearTimeout(inactivityTimeout);
+  }
+  
+  ['mousemove', 'keydown', 'mousedown', 'touchstart'].forEach(evt => {
+    window.addEventListener(evt, resetInactivityTimer, true);
+  });
+  
+  // ============================================================
+  // Expose to Window
+  // ============================================================
+  window.login = login;
+  window.logout = logout;
+  window.showTab = showTab;
+  window.createAdmin = createAdmin;
+  window.changeSuperAdminUsername = changeSuperAdminUsername;
+  window.changeSuperAdminPassword = changeSuperAdminPassword;
+  window.requestSuperAdminUnlock = requestSuperAdminUnlock;

@@ -65,6 +65,14 @@ function updateConnectionStatus(message, color) {
   }
 }
 
+// ============================================================
+// logAttemps
+// ============================================================
+let loginAttempts = 0;
+let loginLockoutUntil = null;
+const MAX_LOGIN_ATTEMPTS = 3;
+const LOCKOUT_DURATION = 30000; // 30 seconds
+
 // Login Functions
 
 async function login(event) {
@@ -73,20 +81,39 @@ async function login(event) {
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value.trim();
   const errorEl = document.getElementById("login-error");
+  const loginBtn = document.getElementById("login-btn");
 
   errorEl.classList.add("hidden");
 
+  // Check if locked out
+  if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
+    const remainingSeconds = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
+    errorEl.textContent = `Too many failed attempts. Please wait ${remainingSeconds} seconds.`;
+    errorEl.classList.remove("hidden");
+    return;
+  }
+
+  // Reset lockout if time has passed
+  if (loginLockoutUntil && Date.now() >= loginLockoutUntil) {
+    loginAttempts = 0;
+    loginLockoutUntil = null;
+  }
+
   try {
+    console.log('Login attempt:', { username, loginAttempts });
     const hashed = await sha256(password);
 
-    // Check super admin (support hashed or plaintext storage)
+    // Check super admin
     const saSnap = await get(superAdminRef);
     const saData = saSnap.val();
     const saPass = saData?.password || saData?.passwordHash;
     const isSaMatch = saData
       && saData.username === username
       && (saPass === hashed || saPass === password);
+    
     if (isSaMatch) {
+      loginAttempts = 0;
+      loginLockoutUntil = null;
       isSuperAdmin = true;
       currentUsername = username;
       document.getElementById("login-section").classList.add("hidden");
@@ -101,14 +128,17 @@ async function login(event) {
       return;
     }
 
-    // Check regular admins (case-insensitive username, support hashed/plain fields)
+    // Check regular admins
     const adminSnap = await get(adminsRef);
     const admins = adminSnap.val() || {};
     const usernameKey = Object.keys(admins).find(k => k.toLowerCase() === username.toLowerCase());
     const adminRecord = usernameKey ? admins[usernameKey] : undefined;
     const adminPass = adminRecord?.passwordHash || adminRecord?.password;
     const isAdminMatch = adminRecord && (adminPass === hashed || adminPass === password);
+    
     if (isAdminMatch) {
+      loginAttempts = 0;
+      loginLockoutUntil = null;
       currentUsername = usernameKey;
       document.getElementById("login-section").classList.add("hidden");
       document.getElementById("dashboard").classList.remove("hidden");
@@ -118,7 +148,64 @@ async function login(event) {
       return;
     }
 
-    errorEl.textContent = "Invalid credentials.";
+    // Invalid credentials
+    loginAttempts++;
+    console.log('Failed login attempt:', loginAttempts);
+
+    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+      // Lock out for 30 seconds
+      loginLockoutUntil = Date.now() + LOCKOUT_DURATION;
+      errorEl.textContent = `Too many failed attempts. Locked out for 30 seconds.`;
+      
+      // Show unlock request button
+      const unlockBtn = document.getElementById("request-superadmin-btn");
+      if (unlockBtn) {
+        unlockBtn.classList.remove("hidden");
+      }
+      
+      // Create unlock request automatically
+      try {
+        const newReqRef = push(unlockReqsRef);
+        await set(newReqRef, {
+          username: username,
+          client: 'Web Admin - Failed Login',
+          requestedAt: Date.now(),
+          status: 'Pending',
+          attemptCount: loginAttempts
+        });
+        
+        const statusEl = document.getElementById('sa-request-status');
+        if (statusEl) {
+          statusEl.textContent = 'Unlock request sent to Super Admin.';
+          statusEl.classList.remove('hidden');
+        }
+      } catch (e) {
+        console.error('Failed to create unlock request:', e);
+      }
+      
+      // Start countdown
+      const countdownInterval = setInterval(() => {
+        if (Date.now() >= loginLockoutUntil) {
+          clearInterval(countdownInterval);
+          loginAttempts = 0;
+          loginLockoutUntil = null;
+          errorEl.textContent = 'You can try logging in again.';
+          errorEl.classList.add('bg-green-900', 'text-green-200');
+          setTimeout(() => {
+            errorEl.classList.add("hidden");
+            errorEl.classList.remove('bg-green-900', 'text-green-200');
+          }, 3000);
+        } else {
+          const remainingSeconds = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
+          errorEl.textContent = `Too many failed attempts. Please wait ${remainingSeconds} seconds.`;
+        }
+      }, 1000);
+      
+    } else {
+      const attemptsLeft = MAX_LOGIN_ATTEMPTS - loginAttempts;
+      errorEl.textContent = `Invalid credentials. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`;
+    }
+
     errorEl.classList.remove("hidden");
 
   } catch (err) {
@@ -127,6 +214,41 @@ async function login(event) {
     errorEl.classList.remove("hidden");
   }
 }
+
+// Add this to your initializeDatabaseListeners function
+onValue(unlockReqsRef, (snapshot) => {
+  const data = snapshot.val() || {};
+  populateUnlockRequests(data);
+  
+  // Check if current user has an approved unlock request
+  if (!isAuthenticated && loginLockoutUntil) {
+    const currentUser = document.getElementById("username")?.value?.trim();
+    if (currentUser) {
+      const approved = Object.values(data).find(
+        req => req.username === currentUser && req.status === 'Approved'
+      );
+      
+      if (approved) {
+        // Clear lockout
+        loginAttempts = 0;
+        loginLockoutUntil = null;
+        
+        const errorEl = document.getElementById("login-error");
+        if (errorEl) {
+          errorEl.textContent = 'Your account has been unlocked by Super Admin. You can login now.';
+          errorEl.classList.remove("hidden");
+          errorEl.classList.add('bg-green-900', 'text-green-200');
+        }
+        
+        const statusEl = document.getElementById('sa-request-status');
+        if (statusEl) {
+          statusEl.textContent = 'Approved! You can now login.';
+          statusEl.classList.add('text-green-400');
+        }
+      }
+    }
+  }
+});
 
 // Expose to HTML
 window.login = login;
@@ -636,52 +758,73 @@ function populateAdminSessions(data) {
 }
 
  // Super Admin Settings Functions
- async function changeSuperAdminUsername(event) {
+ async function changeSuperAdminPassword(event) {
   event.preventDefault();
   if (!requireSuperAdmin()) return;
   
-  const newUsername = document.getElementById('new-username').value.trim();
-  if (!newUsername) {
-    alert('Please enter a new username');
+  const currentPassword = document.getElementById('current-password').value;
+  const newPassword = document.getElementById('new-password').value;
+  const confirmPassword = document.getElementById('confirm-password').value;
+  
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    alert('Please fill in all password fields');
     return;
   }
   
-  if (newUsername.toLowerCase() === 'superadmin') {
-    alert('Cannot use "superadmin" as username');
+  if (newPassword !== confirmPassword) {
+    alert('New passwords do not match');
     return;
   }
   
-  if (newUsername === currentUsername) {
-    alert('New username is the same as current username');
+  if (newPassword.length < 6) {
+    alert('New password must be at least 6 characters long');
     return;
   }
   
   try {
-    // Get current superadmin data
+    // Stop the inactivity timer during the operation
+    stopInactivityTimer();
+    
+    // Get current data
     const saSnap = await get(superAdminRef);
     if (!saSnap.exists()) {
       alert('Superadmin account not found');
+      startInactivityTimer();
       return;
     }
     
     const currentData = saSnap.val();
+    const storedHash = currentData?.passwordHash || currentData?.password || '';
     
-    // Update username while preserving other data
-    await update(superAdminRef, {
-      username: newUsername,
+    // Verify current password
+    const inputHash = await sha256(currentPassword);
+    const isMatch = (inputHash === storedHash) || (currentPassword === storedHash);
+    
+    if (!isMatch) {
+      alert('Current password is incorrect');
+      startInactivityTimer();
+      return;
+    }
+    
+    // Create new hash
+    const newHash = await sha256(newPassword);
+    
+    // Update with complete data
+    await set(superAdminRef, {
+      username: currentData.username,
+      passwordHash: newHash,
+      createdAt: currentData.createdAt || Date.now(),
       updatedAt: Date.now()
     });
     
-    // Update current username
-    currentUsername = newUsername;
+    console.log('Password updated in database');
     
-    alert(`Username changed successfully to "${newUsername}". You will need to log in again.`);
+    alert('Password changed successfully. You will be logged out.');
     
     // Clear form
-    document.getElementById('new-username').value = '';
-    
-    // Update display
-    updateSuperAdminDisplay();
+    document.getElementById('current-password').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('confirm-password').value = '';
     
     // Logout after 2 seconds
     setTimeout(() => {
@@ -689,8 +832,9 @@ function populateAdminSessions(data) {
     }, 2000);
     
   } catch (e) {
-    console.error('Username change error:', e);
-    alert('Failed to change username: ' + e.message);
+    console.error('Password change error:', e);
+    alert('Failed to change password: ' + e.message);
+    startInactivityTimer();
   }
 }
 
@@ -781,17 +925,60 @@ async function deleteAdmin(username) {
 
 // ====================== APPROVE UNLOCK REQUEST FUNCTION ======================
 async function approveUnlockRequest(reqId) {
-  if (!isSuperAdmin) {
-    alert('Only Super Admin can approve unlock requests.');
+  if (!requireSuperAdmin()) return;
+  if (!reqId) return;
+  
+  if (!confirm(`Approve unlock request '${reqId}'?`)) {
     return;
   }
-  if (!reqId) return;
+  
   try {
-    await update(ref(db, `unlock_requests/${reqId}`), { status: 'Approved' });
-    alert(`Unlock request '${reqId}' approved.`);
+    stopInactivityTimer();
+    
+    // Update the request status
+    await set(ref(db, `unlock_requests/${reqId}`), { 
+      status: 'Approved',
+      approvedAt: Date.now(),
+      approvedBy: currentUsername
+    });
+    
+    console.log('Unlock request approved:', reqId);
+    alert(`Unlock request '${reqId}' approved successfully.`);
+    
+    startInactivityTimer();
   } catch (e) {
     console.error('Failed to approve unlock request:', e);
-    alert('Failed to approve unlock request.');
+    alert('Failed to approve unlock request: ' + e.message);
+    startInactivityTimer();
+  }
+}
+
+async function rejectUnlockRequest(reqId) {
+  if (!requireSuperAdmin()) return;
+  if (!reqId) return;
+  
+  if (!confirm(`Reject unlock request '${reqId}'?`)) {
+    return;
+  }
+  
+  try {
+    stopInactivityTimer();
+    
+    // Update the request status
+    await set(ref(db, `unlock_requests/${reqId}`), { 
+      status: 'Rejected',
+      rejectedAt: Date.now(),
+      rejectedBy: currentUsername
+    });
+    
+    console.log('Unlock request rejected:', reqId);
+    alert(`Unlock request '${reqId}' rejected successfully.`);
+    
+    startInactivityTimer();
+  } catch (e) {
+    console.error('Failed to reject unlock request:', e);
+    alert('Failed to reject unlock request: ' + e.message);
+    startInactivityTimer();
   }
 }
 
@@ -947,7 +1134,8 @@ async function createAdmin(event) {
   }
 }
 
+
+
 // Expose to window for HTML onclick
 window.createAdmin = createAdmin;
-
 

@@ -147,106 +147,84 @@ async function login(event) {
     const saPass = saData?.password || saData?.passwordHash;
     const isSaMatch = saData && saData.username === username && (saPass === hashed || saPass === password);
     
-    if (isSaMatch) {
-      loginAttempts = 0;
-      loginLockoutUntil = null;
-      isSuperAdmin = true;
-      currentUsername = username;
-      document.getElementById("login-section").classList.add("hidden");
-      document.getElementById("dashboard").classList.remove("hidden");
-      document.getElementById("btn-unlocks").classList.remove("hidden");
-      document.getElementById("btn-sessions").classList.remove("hidden");
-      document.getElementById("btn-admins").classList.remove("hidden");
-      document.getElementById("btn-settings").classList.remove("hidden");
-      document.getElementById("welcome-label").textContent = `Welcome, Super Admin`;
-      updateSuperAdminDisplay();
-      startInactivityTimer();
-      return;
-    }
-
-    const adminSnap = await get(adminsRef);
-    const admins = adminSnap.val() || {};
-    const usernameKey = Object.keys(admins).find(k => k.toLowerCase() === username.toLowerCase());
-    const adminRecord = usernameKey ? admins[usernameKey] : undefined;
-    const adminPass = adminRecord?.passwordHash || adminRecord?.password;
-    const isAdminMatch = adminRecord && (adminPass === hashed || adminPass === password);
-    
-    if (isAdminMatch) {
-      loginAttempts = 0;
-      loginLockoutUntil = null;
-      currentUsername = usernameKey;
-      document.getElementById("login-section").classList.add("hidden");
-      document.getElementById("dashboard").classList.remove("hidden");
-      document.getElementById("welcome-label").textContent = `Welcome, Admin ${usernameKey}`;
-      updateSuperAdminDisplay();
-      startInactivityTimer();
-      return;
-    }
-
-    loginAttempts++;
-
-    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-      loginLockoutUntil = Date.now() + LOCKOUT_DURATION;
-      errorEl.textContent = `Too many failed attempts. Locked out for 30 seconds.`;
-      
-      const unlockBtn = document.getElementById("request-superadmin-btn");
-      if (unlockBtn) unlockBtn.classList.remove("hidden");
-      
-      try {
-        const newReqRef = push(unlockReqsRef);
-        await set(newReqRef, {
-          username: username,
-          client: 'Web Admin - Failed Login',
-          requestedAt: Date.now(),
-          status: 'Pending',
-          attemptCount: loginAttempts
-        });
-        
-        const statusEl = document.getElementById('sa-request-status');
-        if (statusEl) {
-          statusEl.textContent = 'Unlock request sent to Super Admin.';
-          statusEl.classList.remove('hidden');
-        }
-      } catch (e) {
-        console.error('Failed to create unlock request:', e);
-      }
-      
-      const countdownInterval = setInterval(() => {
-        if (Date.now() >= loginLockoutUntil) {
-          clearInterval(countdownInterval);
-          loginAttempts = 0;
-          loginLockoutUntil = null;
-          errorEl.textContent = 'You can try logging in again.';
-          errorEl.classList.add('bg-green-900', 'text-green-200');
-          setTimeout(() => {
-            errorEl.classList.add("hidden");
-            errorEl.classList.remove('bg-green-900', 'text-green-200');
-          }, 3000);
-        } else {
-          const remainingSeconds = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
-          errorEl.textContent = `Too many failed attempts. Please wait ${remainingSeconds} seconds.`;
-        }
-      }, 1000);
-      
-    } else {
-      const attemptsLeft = MAX_LOGIN_ATTEMPTS - loginAttempts;
-      errorEl.textContent = `Invalid credentials. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`;
-    }
-
-    errorEl.classList.remove("hidden");
-
-  } catch (err) {
-    console.error("Login error:", err);
-    errorEl.textContent = "Login failed. Try again.";
-    errorEl.classList.remove("hidden");
+   // For Super Admin login success (around line 170)
+if (isSaMatch) {
+  loginAttempts = 0;
+  loginLockoutUntil = null;
+  isSuperAdmin = true;
+  currentUsername = username;
+  
+  // CREATE ADMIN SESSION
+  try {
+    const sessionRef = push(adminSessionsRef);
+    await set(sessionRef, {
+      username: username,
+      role: 'Super Admin',
+      timeIn: Date.now(),
+      timeOut: null
+    });
+    currentAdminSessionKey = sessionRef.key;
+  } catch (e) {
+    console.error('Failed to create session:', e);
   }
+  
+  document.getElementById("login-section").classList.add("hidden");
+  document.getElementById("dashboard").classList.remove("hidden");
+  document.getElementById("btn-unlocks").classList.remove("hidden");
+  document.getElementById("btn-sessions").classList.remove("hidden");
+  document.getElementById("btn-admins").classList.remove("hidden");
+  document.getElementById("btn-settings").classList.remove("hidden");
+  document.getElementById("welcome-label").textContent = `Welcome, Super Admin`;
+  updateSuperAdminDisplay();
+  startInactivityTimer();
+  return;
 }
 
-function logout() {
+// For Regular Admin login success (around line 195)
+if (isAdminMatch) {
+  loginAttempts = 0;
+  loginLockoutUntil = null;
+  currentUsername = usernameKey;
+  
+  // CREATE ADMIN SESSION
   try {
+    const sessionRef = push(adminSessionsRef);
+    await set(sessionRef, {
+      username: usernameKey,
+      role: 'Admin',
+      timeIn: Date.now(),
+      timeOut: null
+    });
+    currentAdminSessionKey = sessionRef.key;
+  } catch (e) {
+    console.error('Failed to create session:', e);
+  }
+  
+  document.getElementById("login-section").classList.add("hidden");
+  document.getElementById("dashboard").classList.remove("hidden");
+  document.getElementById("welcome-label").textContent = `Welcome, Admin ${usernameKey}`;
+  updateSuperAdminDisplay();
+  startInactivityTimer();
+  return;
+}
+
+async function logout() {
+  try {
+    // Update session timeOut before logging out
+    if (currentAdminSessionKey) {
+      try {
+        await update(ref(db, `admin_sessions/${currentAdminSessionKey}`), {
+          timeOut: Date.now()
+        });
+      } catch (e) {
+        console.error('Failed to update session logout time:', e);
+      }
+    }
+    
     isSuperAdmin = false;
     isAuthenticated = false;
     currentUsername = null;
+    currentAdminSessionKey = null;
 
     document.getElementById('dashboard')?.classList.add('hidden');
     document.getElementById('login-section')?.classList.remove('hidden');
@@ -266,6 +244,8 @@ function logout() {
     console.error('logout error:', e);
   }
 }
+
+let currentAdminSessionKey = null;
 
 // ============================================================
 // Firebase Authentication

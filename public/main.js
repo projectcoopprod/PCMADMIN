@@ -960,38 +960,6 @@ async function deleteAdmin(username) {
   }
 }
 
-// ====================== APPROVE UNLOCK REQUEST FUNCTION ======================
-async function approveUnlockRequest(reqId) {
-  if (!isSuperAdmin) {
-    alert('Only Super Admin can approve unlock requests.');
-    return;
-  }
-  if (!reqId) return;
-  try {
-    await update(ref(db, `unlock_requests/${reqId}`), { status: 'Approved' });
-    alert(`Unlock request '${reqId}' approved.`);
-  } catch (e) {
-    console.error('Failed to approve unlock request:', e);
-    alert('Failed to approve unlock request.');
-  }
-}
-
-// ====================== REJECT UNLOCK REQUEST FUNCTION ======================
-async function rejectUnlockRequest(reqId) {
-  if (!isSuperAdmin) {
-    alert('Only Super Admin can reject unlock requests.');
-    return;
-  }
-  if (!reqId) return;
-  try {
-    await update(ref(db, `unlock_requests/${reqId}`), { status: 'Rejected' });
-    alert(`Unlock request '${reqId}' rejected.`);
-  } catch (e) {
-    console.error('Failed to reject unlock request:', e);
-    alert('Failed to reject unlock request.');
-  }
-}
-
 // ====================== DELETE STUDENT FUNCTION ======================
 async function deleteStudent(studentId) {
   if (!isAuthenticated) {
@@ -1072,3 +1040,4 @@ function startInactivityTimer() {
 function stopInactivityTimer() {
   clearTimeout(inactivityTimeout);
 }
+

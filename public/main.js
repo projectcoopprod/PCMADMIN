@@ -285,57 +285,71 @@ function initializeDatabaseListeners() {
   });
 
   // FIXED: Unlock requests listener with real-time unlock
-  onValue(unlockReqsRef, (snapshot) => {
-    const data = snapshot.val() || {};
-    populateUnlockRequests(data);
+  // FIXED: Unlock requests listener with real-time unlock AND auto-login
+onValue(unlockReqsRef, (snapshot) => {
+  const data = snapshot.val() || {};
+  populateUnlockRequests(data);
+  
+  // Check if current locked-out user has been approved
+  if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
+    const currentUser = document.getElementById("username")?.value?.trim();
+    const currentPass = document.getElementById("password")?.value?.trim();
     
-    // Check if current locked-out user has been approved
-    if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
-      const currentUser = document.getElementById("username")?.value?.trim();
-      if (currentUser) {
-        // Find any approved request for this user
-        const approvedRequest = Object.entries(data).find(
-          ([reqId, req]) => 
-            req.username === currentUser && 
-            req.status === 'Approved' &&
-            req.requestedAt > (Date.now() - 300000) // Within last 5 minutes
-        );
+    if (currentUser) {
+      // Find any approved request for this user
+      const approvedRequest = Object.entries(data).find(
+        ([reqId, req]) => 
+          req.username === currentUser && 
+          req.status === 'Approved' &&
+          req.requestedAt > (Date.now() - 300000) // Within last 5 minutes
+      );
+      
+      if (approvedRequest) {
+        // Unlock the user immediately
+        loginAttempts = 0;
+        loginLockoutUntil = null;
         
-        if (approvedRequest) {
-          // Unlock the user immediately
-          loginAttempts = 0;
-          loginLockoutUntil = null;
-          
-          const errorEl = document.getElementById("login-error");
-          if (errorEl) {
-            errorEl.textContent = '✓ Your account has been unlocked by Super Admin. You can login now.';
-            errorEl.classList.remove("hidden");
-            errorEl.classList.remove('bg-red-900', 'text-red-200');
-            errorEl.classList.add('bg-green-900', 'text-green-200');
-            
-            // Hide after 5 seconds
-            setTimeout(() => {
-              errorEl.classList.add("hidden");
-              errorEl.classList.remove('bg-green-900', 'text-green-200');
-            }, 5000);
-          }
-          
-          const statusEl = document.getElementById('sa-request-status');
-          if (statusEl) {
-            statusEl.textContent = '✓ Approved! You can now login.';
-            statusEl.classList.add('text-green-400');
-            statusEl.classList.remove('hidden');
-          }
-          
-          // Hide unlock button
-          const unlockBtn = document.getElementById("request-superadmin-btn");
-          if (unlockBtn) unlockBtn.classList.add("hidden");
-          
-          console.log('User unlocked via Super Admin approval');
+        const errorEl = document.getElementById("login-error");
+        if (errorEl) {
+          errorEl.textContent = '✓ Your account has been unlocked! Logging you in...';
+          errorEl.classList.remove("hidden");
+          errorEl.classList.remove('bg-red-900', 'text-red-200');
+          errorEl.classList.add('bg-green-900', 'text-green-200');
         }
+        
+        const statusEl = document.getElementById('sa-request-status');
+        if (statusEl) {
+          statusEl.textContent = '✓ Approved! Logging you in...';
+          statusEl.classList.add('text-green-400');
+          statusEl.classList.remove('hidden');
+        }
+        
+        // Hide unlock button
+        const unlockBtn = document.getElementById("request-superadmin-btn");
+        if (unlockBtn) unlockBtn.classList.add("hidden");
+        
+        console.log('User unlocked via Super Admin approval - auto-logging in');
+        
+        // AUTO-LOGIN: Trigger login after 1 second
+        setTimeout(async () => {
+          if (currentPass) {
+            // Simulate login button click with the stored credentials
+            const loginEvent = new Event('submit', { cancelable: true, bubbles: true });
+            const loginForm = document.querySelector('#login-section form');
+            if (loginForm) {
+              loginForm.dispatchEvent(loginEvent);
+            }
+          } else {
+            // If no password stored, just show success message
+            if (errorEl) {
+              errorEl.textContent = '✓ Account unlocked! Please enter your password and login.';
+            }
+          }
+        }, 1000);
       }
     }
-  });
+  }
+});
 
   onValue(adminSessionsRef, (snapshot) => {
     populateAdminSessions(snapshot.val() || {});

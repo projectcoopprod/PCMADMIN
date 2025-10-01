@@ -767,7 +767,7 @@ function populateUnlockRequests(data) {
   }
 
   // Attach approve/reject event listeners after populating unlock requests
-  const rows = tbody.querySelectorAll('tr');
+ const rows = tbody.querySelectorAll('tr');
   Object.keys(data).forEach((reqId, idx) => {
     const approveBtn = rows[idx]?.querySelector('button:nth-child(1)');
     const rejectBtn = rows[idx]?.querySelector('button:nth-child(2)');
@@ -786,11 +786,11 @@ function populateUnlockRequests(data) {
       });
     }
   });
-}
+}  
 
-// ====================== POPULATE ADMIN SESSIONS ======================
 function populateAdminSessions(data) {
   const tbody = document.getElementById("admin-session-table-body");
+
   if (!tbody) return;
   tbody.innerHTML = "";
 
@@ -1040,4 +1040,5 @@ function startInactivityTimer() {
 function stopInactivityTimer() {
   clearTimeout(inactivityTimeout);
 }
+
 

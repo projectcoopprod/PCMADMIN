@@ -21,6 +21,7 @@ const firebaseConfig = {
 
 // ============================================================
 // Initialize Firebase
+
 // ============================================================
 let app, db, auth;
 try {
@@ -28,8 +29,9 @@ try {
   db = getDatabase(app);
   auth = getAuth(app);
 } catch (error) {
-  console.error("Firebase initialization failed:", error);
-  alert("Failed to initialize Firebase. Please check your configuration.");
+  console.error("❌ Firebase initialization failed:", error);
+  hideLoadingScreen();
+  showError("Failed to initialize Firebase. Please check your configuration.");
 }
 
 // ============================================================
@@ -39,15 +41,12 @@ let combinedData = [];
 let isAuthenticated = false;
 let isAppReady = false;
 let isSuperAdmin = false;
+let superAdminIdle = false;
 let currentUsername = null;
 let currentAdminSessionKey = null;
 let roleChartInstance = null;
 let timeChartInstance = null;
 let dateChartInstance = null;
-let loginAttempts = 0;
-let loginLockoutUntil = null;
-const MAX_LOGIN_ATTEMPTS = 3;
-const LOCKOUT_DURATION = 30000;
 
 const studentsRef = ref(db, "students");
 const visitorsRef = ref(db, "visitors");
@@ -65,6 +64,80 @@ function updateConnectionStatus(message, color) {
     statusEl.innerHTML = `<span class="text-${color}-400">${message}</span>`;
   }
 }
+
+// Login Functions
+
+async function login(event) {
+  event.preventDefault();
+
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
+  const errorEl = document.getElementById("login-error");
+
+  errorEl.classList.add("hidden");
+
+  try {
+    console.log('Login attempt:', { username, password });
+    const hashed = await sha256(password);
+    console.log('Hashed password:', hashed);
+
+    // Check super admin (support hashed or plaintext storage)
+    const saSnap = await get(superAdminRef);
+    const saData = saSnap.val();
+    console.log('Super admin data from Firebase:', saData);
+    const saPass = saData?.password || saData?.passwordHash;
+    const isSaMatch = saData
+      && saData.username === username
+      && (saPass === hashed || saPass === password);
+    console.log('Super admin match:', isSaMatch);
+    if (isSaMatch) {
+      isSuperAdmin = true;
+      currentUsername = username;
+      document.getElementById("login-section").classList.add("hidden");
+      document.getElementById("dashboard").classList.remove("hidden");
+      document.getElementById("btn-unlocks").classList.remove("hidden");
+      document.getElementById("btn-sessions").classList.remove("hidden");
+      document.getElementById("btn-admins").classList.remove("hidden");
+      document.getElementById("btn-settings").classList.remove("hidden");
+      document.getElementById("welcome-label").textContent = `Welcome, Super Admin`;
+      updateSuperAdminDisplay();
+      startInactivityTimer();
+      return;
+    }
+
+    // Check regular admins (case-insensitive username, support hashed/plain fields)
+    const adminSnap = await get(adminsRef);
+    const admins = adminSnap.val() || {};
+    console.log('Admins data from Firebase:', admins);
+    const usernameKey = Object.keys(admins).find(k => k.toLowerCase() === username.toLowerCase());
+    const adminRecord = usernameKey ? admins[usernameKey] : undefined;
+    console.log('Matched admin record:', adminRecord);
+    const adminPass = adminRecord?.passwordHash || adminRecord?.password;
+    const isAdminMatch = adminRecord && (adminPass === hashed || adminPass === password);
+    console.log('Admin match:', isAdminMatch);
+    if (isAdminMatch) {
+      currentUsername = usernameKey;
+      document.getElementById("login-section").classList.add("hidden");
+      document.getElementById("dashboard").classList.remove("hidden");
+      document.getElementById("welcome-label").textContent = `Welcome, Admin ${usernameKey}`;
+      updateSuperAdminDisplay();
+      startInactivityTimer();
+      return;
+    }
+
+    errorEl.textContent = "Invalid credentials.";
+    errorEl.classList.remove("hidden");
+
+  } catch (err) {
+    console.error("Login error:", err);
+    errorEl.textContent = "Login failed. Try again.";
+    errorEl.classList.remove("hidden");
+  }
+}
+
+// Expose to HTML
+window.login = login;
+
 
 function hideLoadingScreen() {
   document.getElementById("loading-screen")?.classList.add("hidden");
@@ -96,236 +169,29 @@ async function sha256(text) {
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
   }
+  if (window.sha256) return window.sha256(text);
   throw new Error("No SHA-256 available");
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function requireSuperAdmin() {
-  if (!isSuperAdmin) {
-    alert('Only Super Admin can perform this action.');
-    return false;
-  }
-  return true;
-}
-
-// ============================================================
-// Login Function
-// ============================================================
-async function login(event) {
-  event.preventDefault();
-
-  const username = document.getElementById("username").value.trim();
-  const password = document.getElementById("password").value.trim();
-  const errorEl = document.getElementById("login-error");
-
-  errorEl.classList.add("hidden");
-
-  if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
-    const remainingSeconds = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
-    errorEl.textContent = `Too many failed attempts. Please wait ${remainingSeconds} seconds.`;
-    errorEl.classList.remove("hidden");
-    return;
-  }
-
-  if (loginLockoutUntil && Date.now() >= loginLockoutUntil) {
-    loginAttempts = 0;
-    loginLockoutUntil = null;
-  }
-
-  try {
-    const hashed = await sha256(password);
-
-    const saSnap = await get(superAdminRef);
-    const saData = saSnap.val();
-    const saPass = saData?.password || saData?.passwordHash;
-    const isSaMatch = saData && saData.username === username && (saPass === hashed || saPass === password);
-    
-    if (isSaMatch) {
-      loginAttempts = 0;
-      loginLockoutUntil = null;
-      isSuperAdmin = true;
-      currentUsername = username;
-      
-      try {
-        const sessionRef = push(adminSessionsRef);
-        await set(sessionRef, {
-          username: username,
-          role: 'Super Admin',
-          timeIn: Date.now(),
-          timeOut: null
-        });
-        currentAdminSessionKey = sessionRef.key;
-      } catch (e) {
-        console.error('Failed to create session:', e);
-      }
-      
-      document.getElementById("login-section").classList.add("hidden");
-      document.getElementById("dashboard").classList.remove("hidden");
-      document.getElementById("btn-unlocks").classList.remove("hidden");
-      document.getElementById("btn-sessions").classList.remove("hidden");
-      document.getElementById("btn-admins").classList.remove("hidden");
-      document.getElementById("btn-settings").classList.remove("hidden");
-      document.getElementById("welcome-label").textContent = `Welcome, Super Admin`;
-      updateSuperAdminDisplay();
-      startInactivityTimer();
-      return;
-    }
-
-    const adminSnap = await get(adminsRef);
-    const admins = adminSnap.val() || {};
-    const usernameKey = Object.keys(admins).find(k => k.toLowerCase() === username.toLowerCase());
-    const adminRecord = usernameKey ? admins[usernameKey] : undefined;
-    const adminPass = adminRecord?.passwordHash || adminRecord?.password;
-    const isAdminMatch = adminRecord && (adminPass === hashed || adminPass === password);
-    
-    if (isAdminMatch) {
-      loginAttempts = 0;
-      loginLockoutUntil = null;
-      currentUsername = usernameKey;
-      
-      try {
-        const sessionRef = push(adminSessionsRef);
-        await set(sessionRef, {
-          username: usernameKey,
-          role: 'Admin',
-          timeIn: Date.now(),
-          timeOut: null
-        });
-        currentAdminSessionKey = sessionRef.key;
-      } catch (e) {
-        console.error('Failed to create session:', e);
-      }
-      
-      document.getElementById("login-section").classList.add("hidden");
-      document.getElementById("dashboard").classList.remove("hidden");
-      document.getElementById("welcome-label").textContent = `Welcome, Admin ${usernameKey}`;
-      updateSuperAdminDisplay();
-      startInactivityTimer();
-      return;
-    }
-
-    loginAttempts++;
-
-    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-      loginLockoutUntil = Date.now() + LOCKOUT_DURATION;
-      errorEl.textContent = `Too many failed attempts. Locked out for 30 seconds.`;
-      
-      const unlockBtn = document.getElementById("request-superadmin-btn");
-      if (unlockBtn) unlockBtn.classList.remove("hidden");
-      
-      try {
-        const newReqRef = push(unlockReqsRef);
-        await set(newReqRef, {
-          username: username,
-          client: 'Web Admin - Failed Login',
-          requestedAt: Date.now(),
-          status: 'Pending',
-          attemptCount: loginAttempts
-        });
-        
-        const statusEl = document.getElementById('sa-request-status');
-        if (statusEl) {
-          statusEl.textContent = 'Unlock request sent to Super Admin.';
-          statusEl.classList.remove('hidden');
-        }
-      } catch (e) {
-        console.error('Failed to create unlock request:', e);
-      }
-      
-      const countdownInterval = setInterval(() => {
-        if (Date.now() >= loginLockoutUntil) {
-          clearInterval(countdownInterval);
-          loginAttempts = 0;
-          loginLockoutUntil = null;
-          errorEl.textContent = 'You can try logging in again.';
-          errorEl.classList.add('bg-green-900', 'text-green-200');
-          setTimeout(() => {
-            errorEl.classList.add("hidden");
-            errorEl.classList.remove('bg-green-900', 'text-green-200');
-          }, 3000);
-        } else {
-          const remainingSeconds = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
-          errorEl.textContent = `Too many failed attempts. Please wait ${remainingSeconds} seconds.`;
-        }
-      }, 1000);
-      
-    } else {
-      const attemptsLeft = MAX_LOGIN_ATTEMPTS - loginAttempts;
-      errorEl.textContent = `Invalid credentials. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`;
-    }
-
-    errorEl.classList.remove("hidden");
-
-  } catch (err) {
-    console.error("Login error:", err);
-    errorEl.textContent = "Login failed. Try again.";
-    errorEl.classList.remove("hidden");
-  }
-}
-
-async function logout() {
-  try {
-    if (currentAdminSessionKey) {
-      try {
-        await update(ref(db, `admin_sessions/${currentAdminSessionKey}`), {
-          timeOut: Date.now()
-        });
-      } catch (e) {
-        console.error('Failed to update session logout time:', e);
-      }
-    }
-    
-    isSuperAdmin = false;
-    isAuthenticated = false;
-    currentUsername = null;
-    currentAdminSessionKey = null;
-
-    document.getElementById('dashboard')?.classList.add('hidden');
-    document.getElementById('login-section')?.classList.remove('hidden');
-    const u = document.getElementById('username');
-    const p = document.getElementById('password');
-    if (u) u.value = '';
-    if (p) p.value = '';
-
-    document.getElementById('btn-unlocks')?.classList.add('hidden');
-    document.getElementById('btn-sessions')?.classList.add('hidden');
-    document.getElementById('btn-admins')?.classList.add('hidden');
-    document.getElementById('btn-settings')?.classList.add('hidden');
-
-    showTab('home');
-    stopInactivityTimer();
-  } catch (e) {
-    console.error('logout error:', e);
-  }
 }
 
 // ============================================================
 // Firebase Authentication
 // ============================================================
 function initializeSecureAuth() {
-  updateConnectionStatus("Connecting to database...", "amber");
+  updateConnectionStatus("🔄 Connecting to database...", "amber");
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
       isAuthenticated = true;
-      updateConnectionStatus("Connected to database", "green");
+      updateConnectionStatus("✅ Connected to database", "green");
       if (!isAppReady) {
         initializeDatabaseListeners();
         isAppReady = true;
       }
     } else {
-      updateConnectionStatus("Signing in anonymously...", "amber");
+      updateConnectionStatus("🔄 Signing in anonymously...", "amber");
       signInAnonymously(auth).catch((error) => {
-        console.error("Authentication failed:", error);
-        updateConnectionStatus("Connection failed", "red");
+        console.error("❌ Authentication failed:", error);
+        updateConnectionStatus("❌ Connection failed", "red");
         showError(`Failed to connect to database: ${error.message}.`);
       });
     }
@@ -334,6 +200,11 @@ function initializeSecureAuth() {
 
 // ============================================================
 // Database Listeners
+// ============================================================
+// Replace the unlock request listener section in your main.js with this:
+
+// ============================================================
+// Database Listeners (UPDATED SECTION)
 // ============================================================
 function initializeDatabaseListeners() {
   onValue(studentsRef, (snapshot) => {
@@ -350,33 +221,54 @@ function initializeDatabaseListeners() {
     refreshUI();
   });
 
+  // FIXED: Unlock requests listener with real-time unlock
   onValue(unlockReqsRef, (snapshot) => {
     const data = snapshot.val() || {};
     populateUnlockRequests(data);
     
-    if (!isAuthenticated && loginLockoutUntil) {
+    // Check if current locked-out user has been approved
+    if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
       const currentUser = document.getElementById("username")?.value?.trim();
       if (currentUser) {
-        const approved = Object.values(data).find(
-          req => req.username === currentUser && req.status === 'Approved'
+        // Find any approved request for this user
+        const approvedRequest = Object.entries(data).find(
+          ([reqId, req]) => 
+            req.username === currentUser && 
+            req.status === 'Approved' &&
+            req.requestedAt > (Date.now() - 300000) // Within last 5 minutes
         );
         
-        if (approved) {
+        if (approvedRequest) {
+          // Unlock the user immediately
           loginAttempts = 0;
           loginLockoutUntil = null;
           
           const errorEl = document.getElementById("login-error");
           if (errorEl) {
-            errorEl.textContent = 'Your account has been unlocked by Super Admin. You can login now.';
+            errorEl.textContent = '✓ Your account has been unlocked by Super Admin. You can login now.';
             errorEl.classList.remove("hidden");
+            errorEl.classList.remove('bg-red-900', 'text-red-200');
             errorEl.classList.add('bg-green-900', 'text-green-200');
+            
+            // Hide after 5 seconds
+            setTimeout(() => {
+              errorEl.classList.add("hidden");
+              errorEl.classList.remove('bg-green-900', 'text-green-200');
+            }, 5000);
           }
           
           const statusEl = document.getElementById('sa-request-status');
           if (statusEl) {
-            statusEl.textContent = 'Approved! You can now login.';
+            statusEl.textContent = '✓ Approved! You can now login.';
             statusEl.classList.add('text-green-400');
+            statusEl.classList.remove('hidden');
           }
+          
+          // Hide unlock button
+          const unlockBtn = document.getElementById("request-superadmin-btn");
+          if (unlockBtn) unlockBtn.classList.add("hidden");
+          
+          console.log('User unlocked via Super Admin approval');
         }
       }
     }
@@ -392,11 +284,137 @@ function initializeDatabaseListeners() {
 }
 
 // ============================================================
+// UPDATED: Approve Unlock Request Function
+// ============================================================
+async function approveUnlockRequest(reqId) {
+  if (!requireSuperAdmin()) return;
+  if (!reqId) return;
+  
+  try {
+    stopInactivityTimer();
+    
+    // Get the request data first to know which user to unlock
+    const reqSnap = await get(ref(db, `unlock_requests/${reqId}`));
+    const reqData = reqSnap.val();
+    
+    if (!reqData) {
+      alert('Request not found');
+      startInactivityTimer();
+      return;
+    }
+    
+    // Update the request status
+    await update(ref(db, `unlock_requests/${reqId}`), { 
+      status: 'Approved',
+      approvedAt: Date.now(),
+      approvedBy: currentUsername
+    });
+    
+    console.log('Unlock request approved:', reqId, 'for user:', reqData.username);
+    alert(`Unlock request approved for '${reqData.username}'. They can now login.`);
+    
+    startInactivityTimer();
+  } catch (e) {
+    console.error('Failed to approve unlock request:', e);
+    alert('Failed to approve: ' + e.message);
+    startInactivityTimer();
+  }
+}
+
+// ============================================================
+// UPDATED: Reject Unlock Request Function
+// ============================================================
+async function rejectUnlockRequest(reqId) {
+  if (!requireSuperAdmin()) return;
+  if (!reqId) return;
+  
+  try {
+    stopInactivityTimer();
+    
+    await update(ref(db, `unlock_requests/${reqId}`), { 
+      status: 'Rejected',
+      rejectedAt: Date.now(),
+      rejectedBy: currentUsername
+    });
+    
+    console.log('Unlock request rejected:', reqId);
+    alert(`Unlock request rejected.`);
+    
+    startInactivityTimer();
+  } catch (e) {
+    console.error('Failed to reject:', e);
+    alert('Failed to reject: ' + e.message);
+    startInactivityTimer();
+  }
+}
+
+// ============================================================
+// UPDATED: Request Super Admin Unlock Function
+// ============================================================
+async function requestSuperAdminUnlock() {
+  const username = document.getElementById('username').value.trim();
+  if (!username) {
+    alert('Please enter your username first');
+    return;
+  }
+  
+  try {
+    // Check if there's already a pending request for this user
+    const snapshot = await get(unlockReqsRef);
+    const requests = snapshot.val() || {};
+    
+    const existingPending = Object.values(requests).find(
+      req => req.username === username && 
+             req.status === 'Pending' &&
+             req.requestedAt > (Date.now() - 300000) // Within last 5 minutes
+    );
+    
+    if (existingPending) {
+      const statusEl = document.getElementById('sa-request-status');
+      if (statusEl) {
+        statusEl.textContent = 'Unlock request already sent. Waiting for Super Admin approval...';
+        statusEl.classList.remove('hidden');
+      }
+      return;
+    }
+    
+    // Create new unlock request
+    const newReqRef = push(unlockReqsRef);
+    await set(newReqRef, {
+      username: username,
+      client: 'Web Admin - Locked Out',
+      requestedAt: Date.now(),
+      status: 'Pending',
+      attemptCount: loginAttempts
+    });
+    
+    const statusEl = document.getElementById('sa-request-status');
+    if (statusEl) {
+      statusEl.textContent = 'Unlock request sent. Waiting for Super Admin approval...';
+      statusEl.classList.remove('hidden');
+      statusEl.classList.remove('text-green-400');
+      statusEl.classList.add('text-amber-300');
+    }
+    
+    console.log('Unlock request created for:', username);
+    
+  } catch (e) {
+    console.error('Failed to request unlock:', e);
+    alert('Failed to send unlock request: ' + e.message);
+  }
+}
+
+// Make sure to expose the updated functions
+window.approveUnlockRequest = approveUnlockRequest;
+window.rejectUnlockRequest = rejectUnlockRequest;
+window.requestSuperAdminUnlock = requestSuperAdminUnlock;
+
+// ============================================================
 // App Initialization
 // ============================================================
 function initializeApplication() {
   const loadingTimeout = setTimeout(() => {
-    updateConnectionStatus("Connection timeout", "red");
+    updateConnectionStatus("⏰ Connection timeout", "red");
     showError("Connection timeout. Please refresh the page.");
   }, 15000);
 
@@ -409,10 +427,19 @@ function initializeApplication() {
   };
 }
 
+// ============================================================
+// Start Application
+// ============================================================
 initializeApplication();
 
+// Expose functions needed in HTML
+window.showError = showError;
+window.sha256 = sha256;
+window.showTab = showTab;
+window.logout = logout;
+
 // ============================================================
-// UI Refresh
+// UI Refresh (Counts + Tables)
 // ============================================================
 function refreshUI() {
   try {
@@ -427,6 +454,7 @@ function refreshUI() {
     if (visitorCountEl) visitorCountEl.textContent = String(visitors.length);
     if (totalCountEl) totalCountEl.textContent = String(students.length + visitors.length);
 
+    // Tables
     const studentTbody = document.getElementById("student-table-body");
     const visitorTbody = document.getElementById("visitor-table-body");
 
@@ -439,13 +467,18 @@ function refreshUI() {
           <td class="py-3 px-6">${escapeHtml(item.location || item.address || "—")}</td>
           <td class="py-3 px-6">${fmtTime(item.timestamp || item.time || item.dateTime)}</td>
           <td class="py-3 px-6">${fmtDate(item.timestamp || item.time || item.dateTime)}</td>
-          <td class="py-3 px-6"><button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Delete</button></td>`;
-        const deleteBtn = tr.querySelector('button');
-        deleteBtn.addEventListener('click', () => {
-          if (confirm(`Delete student '${escapeHtml(item.nickname || item.name || item.fullname || '—')}'?`)) {
-            deleteStudent(item.id);
-          }
-        });
+          <td class="py-3 px-6"><span class="text-slate-400 text-xs">—</span></td>`;
+        // Add delete button for students
+        const tdAction = tr.querySelector('td:last-child');
+        if (tdAction) {
+          tdAction.innerHTML = `<button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Delete</button>`;
+          const deleteBtn = tdAction.querySelector('button');
+          deleteBtn.addEventListener('click', () => {
+            if (confirm(`Delete student '${escapeHtml(item.nickname || item.name || item.fullname || '—')}'?`)) {
+              deleteStudent(item.id);
+            }
+          });
+        }
         studentTbody.appendChild(tr);
       }
     }
@@ -459,13 +492,18 @@ function refreshUI() {
           <td class="py-3 px-6">${escapeHtml(item.location || item.address || "—")}</td>
           <td class="py-3 px-6">${fmtTime(item.timestamp || item.time || item.dateTime)}</td>
           <td class="py-3 px-6">${fmtDate(item.timestamp || item.time || item.dateTime)}</td>
-          <td class="py-3 px-6"><button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Delete</button></td>`;
-        const deleteBtn = tr.querySelector('button');
-        deleteBtn.addEventListener('click', () => {
-          if (confirm(`Delete visitor '${escapeHtml(item.nickname || item.name || item.fullname || '—')}'?`)) {
-            deleteVisitor(item.id);
-          }
-        });
+          <td class="py-3 px-6"><span class="text-slate-400 text-xs">—</span></td>`;
+        // Add delete button for visitors
+        const tdAction = tr.querySelector('td:last-child');
+        if (tdAction) {
+          tdAction.innerHTML = `<button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Delete</button>`;
+          const deleteBtn = tdAction.querySelector('button');
+          deleteBtn.addEventListener('click', () => {
+            if (confirm(`Delete visitor '${escapeHtml(item.nickname || item.name || item.fullname || '—')}'?`)) {
+              deleteVisitor(item.id);
+            }
+          });
+        }
         visitorTbody.appendChild(tr);
       }
     }
@@ -474,20 +512,33 @@ function refreshUI() {
     console.error("refreshUI error:", e);
   }
 
+  // Update charts after counts/tables
   try { renderCharts(); } catch (e) { console.error("renderCharts error:", e); }
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 // ============================================================
-// Tabs
+// Tabs + Logout
 // ============================================================
 function showTab(tabName, event) {
   try {
     if (event?.preventDefault) event.preventDefault();
 
+    // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    // Show selected
     const active = document.getElementById(`tab-${tabName}`);
     if (active) active.classList.remove('hidden');
 
+    // Update button styles
     const activeClasses = ['bg-indigo-600', 'text-white'];
     const inactiveClasses = ['text-slate-200'];
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -504,14 +555,44 @@ function showTab(tabName, event) {
   }
 }
 
+function logout() {
+  try {
+    isSuperAdmin = false;
+    isAuthenticated = false;
+    currentUsername = null;
+
+    // Simple UI reset
+    document.getElementById('dashboard')?.classList.add('hidden');
+    document.getElementById('login-section')?.classList.remove('hidden');
+    const u = document.getElementById('username');
+    const p = document.getElementById('password');
+    if (u) u.value = '';
+    if (p) p.value = '';
+
+    // Hide superadmin-only tabs next time
+    document.getElementById('btn-unlocks')?.classList.add('hidden');
+    document.getElementById('btn-sessions')?.classList.add('hidden');
+    document.getElementById('btn-admins')?.classList.add('hidden');
+    document.getElementById('btn-settings')?.classList.add('hidden');
+
+    // Default to home tab when back in dashboard
+    showTab('home');
+    stopInactivityTimer();
+  } catch (e) {
+    console.error('logout error:', e);
+  }
+}
+
 // ============================================================
-// Charts
+// Charts (Chart.js)
 // ============================================================
 function renderCharts() {
+  // Only include visitors for the role chart
   const byRole = aggregateByRole(combinedData.filter(x => x._roleNorm === 'visitor'));
   const byHour = aggregateByHour(combinedData);
   const byDay = aggregateByDay(combinedData);
 
+  // Role Chart
   const roleCtx = document.getElementById('roleChart')?.getContext?.('2d');
   if (roleCtx) {
     if (roleChartInstance) roleChartInstance.destroy();
@@ -528,6 +609,7 @@ function renderCharts() {
     });
   }
 
+  // Time (by hour) Chart
   const timeCtx = document.getElementById('timeChart')?.getContext?.('2d');
   if (timeCtx) {
     const labels = [...Array(24).keys()].map(h => h.toString().padStart(2, '0'));
@@ -546,6 +628,7 @@ function renderCharts() {
     });
   }
 
+  // Date (by weekday) Chart
   const dateCtx = document.getElementById('dateChart')?.getContext?.('2d');
   if (dateCtx) {
     const labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -598,15 +681,13 @@ function aggregateByDay(items) {
   for (const it of items) {
     const ts = coerceTimestamp(it.timestamp || it.time || it.date || it.dateTime);
     if (ts == null) continue;
-    const day = new Date(ts).getDay();
+    const day = new Date(ts).getDay(); // 0-6
     counts[day] = (counts[day] || 0) + 1;
   }
   return counts;
 }
 
-// ============================================================
-// Populate Tables
-// ============================================================
+// ====================== POPULATE ADMINS ======================
 function populateAdmins(data) {
   const tbody = document.getElementById("admins-table-body");
   if (!tbody) return;
@@ -614,20 +695,36 @@ function populateAdmins(data) {
 
   for (const [username, adminData] of Object.entries(data)) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="py-3 px-6">${username}</td>
-      <td class="py-3 px-6">${adminData.createdAt ? new Date(adminData.createdAt).toLocaleString() : "—"}</td>
-      <td class="py-3 px-6"><button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Delete</button></td>`;
-    const deleteBtn = tr.querySelector('button');
-    deleteBtn.addEventListener('click', () => {
-      if (confirm(`Are you sure you want to delete admin '${username}'?`)) {
-        deleteAdmin(username);
-      }
-    });
+
+    const tdUser = document.createElement("td");
+    tdUser.className = "py-3 px-6";
+    tdUser.textContent = username;
+
+    const tdCreated = document.createElement("td");
+    tdCreated.className = "py-3 px-6";
+    tdCreated.textContent = adminData.createdAt
+      ? new Date(adminData.createdAt).toLocaleString()
+      : "—";
+
+    const tdAction = document.createElement("td");
+    tdAction.className = "py-3 px-6";
+    tdAction.innerHTML = `<button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Delete</button>`;
+
+    tr.append(tdUser, tdCreated, tdAction);
     tbody.appendChild(tr);
+    // Attach delete event
+    const deleteBtn = tdAction.querySelector('button');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        if (confirm(`Are you sure you want to delete admin '${username}'?`)) {
+          deleteAdmin(username);
+        }
+      });
+    }
   }
 }
 
+// ====================== POPULATE UNLOCK REQUESTS ======================
 function populateUnlockRequests(data) {
   const tbody = document.getElementById("unlock-req-table-body");
   if (!tbody) return;
@@ -635,36 +732,63 @@ function populateUnlockRequests(data) {
 
   for (const [reqId, reqData] of Object.entries(data)) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="py-3 px-6">${reqId}</td>
-      <td class="py-3 px-6">${reqData.client || "—"}</td>
-      <td class="py-3 px-6">${reqData.username || "—"}</td>
-      <td class="py-3 px-6">${reqData.requestedAt ? new Date(reqData.requestedAt).toLocaleString() : "—"}</td>
-      <td class="py-3 px-6">${reqData.status || "Pending"}</td>
-      <td class="py-3 px-6">
-        <button class="approve-btn bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs mr-2">Approve</button>
-        <button class="reject-btn bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Reject</button>
-      </td>`;
-    
-    const approveBtn = tr.querySelector('.approve-btn');
-    const rejectBtn = tr.querySelector('.reject-btn');
-    
-    approveBtn.addEventListener('click', () => {
-      if (confirm(`Approve unlock request '${reqId}'?`)) {
-        approveUnlockRequest(reqId);
-      }
-    });
-    
-    rejectBtn.addEventListener('click', () => {
-      if (confirm(`Reject unlock request '${reqId}'?`)) {
-        rejectUnlockRequest(reqId);
-      }
-    });
-    
+
+    const tdReqId = document.createElement("td");
+    tdReqId.className = "py-3 px-6";
+    tdReqId.textContent = reqId;
+
+    const tdClient = document.createElement("td");
+    tdClient.className = "py-3 px-6";
+    tdClient.textContent = reqData.client || "—";
+
+    const tdUsername = document.createElement("td");
+    tdUsername.className = "py-3 px-6";
+    tdUsername.textContent = reqData.username || "—";
+
+    const tdRequested = document.createElement("td");
+    tdRequested.className = "py-3 px-6";
+    tdRequested.textContent = reqData.requestedAt
+      ? new Date(reqData.requestedAt).toLocaleString()
+      : "—";
+
+    const tdStatus = document.createElement("td");
+    tdStatus.className = "py-3 px-6";
+    tdStatus.textContent = reqData.status || "Pending";
+
+    const tdAction = document.createElement("td");
+    tdAction.className = "py-3 px-6";
+    tdAction.innerHTML = `
+      <button class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs mr-2">Approve</button>
+      <button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded text-xs">Reject</button>
+    `;
+
+    tr.append(tdReqId, tdClient, tdUsername, tdRequested, tdStatus, tdAction);
     tbody.appendChild(tr);
   }
+
+  // Attach approve/reject event listeners after populating unlock requests
+  const rows = tbody.querySelectorAll('tr');
+  Object.keys(data).forEach((reqId, idx) => {
+    const approveBtn = rows[idx]?.querySelector('button:nth-child(1)');
+    const rejectBtn = rows[idx]?.querySelector('button:nth-child(2)');
+    if (approveBtn) {
+      approveBtn.addEventListener('click', () => {
+        if (confirm(`Approve unlock request '${reqId}'?`)) {
+          approveUnlockRequest(reqId);
+        }
+      });
+    }
+    if (rejectBtn) {
+      rejectBtn.addEventListener('click', () => {
+        if (confirm(`Reject unlock request '${reqId}'?`)) {
+          rejectUnlockRequest(reqId);
+        }
+      });
+    }
+  });
 }
 
+// ====================== POPULATE ADMIN SESSIONS ======================
 function populateAdminSessions(data) {
   const tbody = document.getElementById("admin-session-table-body");
   if (!tbody) return;
@@ -672,91 +796,34 @@ function populateAdminSessions(data) {
 
   for (const [sessionId, sessionData] of Object.entries(data)) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="py-3 px-6">${sessionId}</td>
-      <td class="py-3 px-6">${sessionData.username || "—"}</td>
-      <td class="py-3 px-6">${sessionData.timeIn ? new Date(sessionData.timeIn).toLocaleString() : "—"}</td>
-      <td class="py-3 px-6">${sessionData.timeOut ? new Date(sessionData.timeOut).toLocaleString() : "—"}</td>`;
+
+    const tdId = document.createElement("td");
+    tdId.className = "py-3 px-6";
+    tdId.textContent = sessionId;
+
+    const tdUser = document.createElement("td");
+    tdUser.className = "py-3 px-6";
+    tdUser.textContent = sessionData.username || "—";
+
+    const tdIn = document.createElement("td");
+    tdIn.className = "py-3 px-6";
+    tdIn.textContent = sessionData.timeIn
+      ? new Date(sessionData.timeIn).toLocaleString()
+      : "—";
+
+    const tdOut = document.createElement("td");
+    tdOut.className = "py-3 px-6";
+    tdOut.textContent = sessionData.timeOut
+      ? new Date(sessionData.timeOut).toLocaleString()
+      : "—";
+
+    tr.append(tdId, tdUser, tdIn, tdOut);
     tbody.appendChild(tr);
   }
 }
 
-// ============================================================
-// Admin Functions
-// ============================================================
-async function createAdmin(event) {
-  event.preventDefault();
-  if (!requireSuperAdmin()) return;
-  
-  const username = document.getElementById('new-admin-username').value.trim();
-  const password = document.getElementById('new-admin-password').value.trim();
-  
-  if (!username || !password) {
-    alert('Please enter both username and password');
-    return;
-  }
-  
-  if (username.toLowerCase() === 'superadmin') {
-    alert('Cannot use "superadmin" as username');
-    return;
-  }
-  
-  if (password.length < 6) {
-    alert('Password must be at least 6 characters long');
-    return;
-  }
-  
-  try {
-    stopInactivityTimer();
-    
-    const adminSnap = await get(adminsRef);
-    const admins = adminSnap.val() || {};
-    const existingKey = Object.keys(admins).find(k => k.toLowerCase() === username.toLowerCase());
-    
-    if (existingKey) {
-      alert(`Admin '${username}' already exists`);
-      startInactivityTimer();
-      return;
-    }
-    
-    const passwordHash = await sha256(password);
-    
-    await set(ref(db, `admins/${username}`), {
-      passwordHash: passwordHash,
-      createdAt: Date.now()
-    });
-    
-    alert(`Admin '${username}' created successfully`);
-    
-    document.getElementById('new-admin-username').value = '';
-    document.getElementById('new-admin-password').value = '';
-    
-    startInactivityTimer();
-    
-  } catch (e) {
-    console.error('Failed to create admin:', e);
-    alert('Failed to create admin: ' + e.message);
-    startInactivityTimer();
-  }
-}
-
-async function deleteAdmin(username) {
-  if (!requireSuperAdmin()) return;
-  if (!username) return;
-  
-  try {
-    stopInactivityTimer();
-    await remove(ref(db, `admins/${username}`));
-    alert(`Admin '${username}' deleted successfully.`);
-    startInactivityTimer();
-  } catch (e) {
-    console.error('Failed to delete admin:', e);
-    alert('Failed to delete admin.');
-    startInactivityTimer();
-  }
-}
-
-async function changeSuperAdminUsername(event) {
+ // Super Admin Settings Functions
+ async function changeSuperAdminUsername(event) {
   event.preventDefault();
   if (!requireSuperAdmin()) return;
   
@@ -771,275 +838,237 @@ async function changeSuperAdminUsername(event) {
     return;
   }
   
-  if (newUsername === currentUsername) {
-    alert('New username is the same as current username');
-    return;
-  }
-  
   try {
-    stopInactivityTimer();
-    
+    // Get current superadmin data
     const saSnap = await get(superAdminRef);
     if (!saSnap.exists()) {
       alert('Superadmin account not found');
-      startInactivityTimer();
       return;
     }
     
     const currentData = saSnap.val();
     
-    await set(superAdminRef, {
+    // Update username
+    await update(superAdminRef, {
       username: newUsername,
-      passwordHash: currentData.passwordHash || currentData.password,
-      createdAt: currentData.createdAt || Date.now(),
-      updatedAt: Date.now()});
+      updatedAt: Date.now()
+    });
     
-      console.log('Username updated in database to:', newUsername);
-      alert(`Username changed successfully to "${newUsername}". You will be logged out.`);
-      
-      document.getElementById('new-username').value = '';
-      setTimeout(() => logout(), 2000);
-      
-    } catch (e) {
-      console.error('Username change error:', e);
-      alert('Failed to change username: ' + e.message);
-      startInactivityTimer();
-    }
+    alert(`Username changed successfully to "${newUsername}". You will need to log in again.`);
+    
+    // Clear form
+    document.getElementById('new-username').value = '';
+    
+    // Update display
+    updateSuperAdminDisplay();
+    startInactivityTimer();
+    
+    // Logout after 2 seconds
+    setTimeout(() => {
+      logout();
+    }, 2000);
+    
+  } catch (e) {
+    console.error(e);
+    alert('Failed to change username');
+  }
+}
+
+async function changeSuperAdminPassword(event) {
+  event.preventDefault();
+  if (!requireSuperAdmin()) return;
+  
+  const currentPassword = document.getElementById('current-password').value;
+  const newPassword = document.getElementById('new-password').value;
+  const confirmPassword = document.getElementById('confirm-password').value;
+  
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    alert('Please fill in all password fields');
+    return;
   }
   
-  async function changeSuperAdminPassword(event) {
-    event.preventDefault();
-    if (!requireSuperAdmin()) return;
-    
-    const currentPassword = document.getElementById('current-password').value;
-    const newPassword = document.getElementById('new-password').value;
-    const confirmPassword = document.getElementById('confirm-password').value;
-    
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      alert('Please fill in all password fields');
+  if (newPassword !== confirmPassword) {
+    alert('New passwords do not match');
+    return;
+  }
+  
+  if (newPassword.length < 6) {
+    alert('New password must be at least 6 characters long');
+    return;
+  }
+  
+  try {
+    // Get current superadmin data
+    const saSnap = await get(superAdminRef);
+    if (!saSnap.exists()) {
+      alert('Superadmin account not found');
       return;
     }
     
-    if (newPassword !== confirmPassword) {
-      alert('New passwords do not match');
+    const currentData = saSnap.val();
+    const currentHash = (currentData?.passwordHash || '').trim().toLowerCase();
+    
+    // Verify current password
+    const inputHash = (await sha256(currentPassword)).toLowerCase();
+    if (inputHash !== currentHash) {
+      alert('Current password is incorrect');
       return;
     }
     
-    if (newPassword.length < 6) {
-      alert('New password must be at least 6 characters long');
-      return;
-    }
+    // Update password
+    const newHash = (await sha256(newPassword)).toLowerCase();
+    await update(superAdminRef, {
+      passwordHash: newHash,
+      updatedAt: Date.now()
+    });
     
-    try {
-      stopInactivityTimer();
-      
-      const saSnap = await get(superAdminRef);
-      if (!saSnap.exists()) {
-        alert('Superadmin account not found');
-        startInactivityTimer();
-        return;
-      }
-      
-      const currentData = saSnap.val();
-      const storedHash = currentData?.passwordHash || currentData?.password || '';
-      
-      const inputHash = await sha256(currentPassword);
-      const isMatch = (inputHash === storedHash) || (currentPassword === storedHash);
-      
-      if (!isMatch) {
-        alert('Current password is incorrect');
-        startInactivityTimer();
-        return;
-      }
-      
-      const newHash = await sha256(newPassword);
-      
-      await set(superAdminRef, {
-        username: currentData.username,
-        passwordHash: newHash,
-        createdAt: currentData.createdAt || Date.now(),
-        updatedAt: Date.now()
-      });
-      
-      console.log('Password updated in database');
-      alert('Password changed successfully. You will be logged out.');
-      
-      document.getElementById('current-password').value = '';
-      document.getElementById('new-password').value = '';
-      document.getElementById('confirm-password').value = '';
-      
-      setTimeout(() => logout(), 2000);
-      
-    } catch (e) {
-      console.error('Password change error:', e);
-      alert('Failed to change password: ' + e.message);
-      startInactivityTimer();
-    }
-  }
-  
-  async function approveUnlockRequest(reqId) {
-    if (!requireSuperAdmin()) return;
-    if (!reqId) return;
+    alert('Password changed successfully. You will need to log in again.');
     
-    try {
-      stopInactivityTimer();
-      
-      await set(ref(db, `unlock_requests/${reqId}`), { 
-        status: 'Approved',
-        approvedAt: Date.now(),
-        approvedBy: currentUsername
-      });
-      
-      console.log('Unlock request approved:', reqId);
-      alert(`Unlock request '${reqId}' approved successfully.`);
-      
-      startInactivityTimer();
-    } catch (e) {
-      console.error('Failed to approve unlock request:', e);
-      alert('Failed to approve: ' + e.message);
-      startInactivityTimer();
-    }
-  }
-  
-  async function rejectUnlockRequest(reqId) {
-    if (!requireSuperAdmin()) return;
-    if (!reqId) return;
+    // Clear form
+    document.getElementById('current-password').value = '';
+    document.getElementById('new-password').value = '';
+    document.getElementById('confirm-password').value = '';
     
-    try {
-      stopInactivityTimer();
-      
-      await set(ref(db, `unlock_requests/${reqId}`), { 
-        status: 'Rejected',
-        rejectedAt: Date.now(),
-        rejectedBy: currentUsername
-      });
-      
-      console.log('Unlock request rejected:', reqId);
-      alert(`Unlock request '${reqId}' rejected successfully.`);
-      
-      startInactivityTimer();
-    } catch (e) {
-      console.error('Failed to reject:', e);
-      alert('Failed to reject: ' + e.message);
-      startInactivityTimer();
-    }
-  }
-  
-  async function requestSuperAdminUnlock() {
-    const username = document.getElementById('username').value.trim();
-    if (!username) {
-      alert('Please enter your username first');
-      return;
-    }
+    // Update display
+    updateSuperAdminDisplay();
+    startInactivityTimer();
     
-    try {
-      const newReqRef = push(unlockReqsRef);
-      await set(newReqRef, {
-        username: username,
-        client: 'Web Admin',
-        requestedAt: Date.now(),
-        status: 'Pending'
-      });
-      
-      const statusEl = document.getElementById('sa-request-status');
-      if (statusEl) {
-        statusEl.textContent = 'Unlock request sent. Please wait for Super Admin approval.';
-        statusEl.classList.remove('hidden');
-      }
-      
-    } catch (e) {
-      console.error('Failed to request unlock:', e);
-      alert('Failed to send unlock request.');
-    }
-  }
-  
-  async function deleteStudent(studentId) {
-    if (!isAuthenticated) {
-      alert('You must be logged in to delete students.');
-      return;
-    }
-    if (!studentId) return;
+    // Logout after 2 seconds
+    setTimeout(() => {
+      logout();
+    }, 2000);
     
-    try {
-      stopInactivityTimer();
-      await remove(ref(db, `students/${studentId}`));
-      alert('Student deleted successfully.');
-      startInactivityTimer();
-    } catch (e) {
-      console.error('Failed to delete student:', e);
-      alert('Failed to delete student.');
-      startInactivityTimer();
-    }
+  } catch (e) {
+    console.error(e);
+    alert('Failed to change password');
   }
-  
-  async function deleteVisitor(visitorId) {
-    if (!isAuthenticated) {
-      alert('You must be logged in to delete visitors.');
-      return;
-    }
-    if (!visitorId) return;
-    
-    try {
-      stopInactivityTimer();
-      await remove(ref(db, `visitors/${visitorId}`));
-      alert('Visitor deleted successfully.');
-      startInactivityTimer();
-    } catch (e) {
-      console.error('Failed to delete visitor:', e);
-      alert('Failed to delete visitor.');
-      startInactivityTimer();
-    }
+}
+
+// ====================== DELETE ADMIN FUNCTION ======================
+async function deleteAdmin(username) {
+  if (!isSuperAdmin) {
+    alert('Only Super Admin can delete admins.');
+    return;
   }
-  
-  function updateSuperAdminDisplay() {
-    const usernameEl = document.getElementById('display-username');
-    if (usernameEl) {
-      usernameEl.textContent = currentUsername || '';
-    }
-    const currentUsernameInput = document.getElementById('current-username');
-    if (currentUsernameInput) {
-      currentUsernameInput.value = currentUsername || '';
-    }
+  if (!username) return;
+  try {
+    await remove(ref(db, `admins/${username}`));
+    alert(`Admin '${username}' deleted successfully.`);
+  } catch (e) {
+    console.error('Failed to delete admin:', e);
+    alert('Failed to delete admin.');
   }
-  
-  // ============================================================
-  // Inactivity Timer
-  // ============================================================
-  let inactivityTimeout = null;
-  
-  function getAutoLogoutDuration() {
-    return isSuperAdmin ? 4000 : 30000;
+}
+
+// ====================== APPROVE UNLOCK REQUEST FUNCTION ======================
+async function approveUnlockRequest(reqId) {
+  if (!isSuperAdmin) {
+    alert('Only Super Admin can approve unlock requests.');
+    return;
   }
-  
-  function resetInactivityTimer() {
-    clearTimeout(inactivityTimeout);
-    if (isAuthenticated) {
-      inactivityTimeout = setTimeout(() => {
-        alert('Session expired due to inactivity. You will be logged out.');
-        logout();
-      }, getAutoLogoutDuration());
-    }
+  if (!reqId) return;
+  try {
+    await update(ref(db, `unlock_requests/${reqId}`), { status: 'Approved' });
+    alert(`Unlock request '${reqId}' approved.`);
+  } catch (e) {
+    console.error('Failed to approve unlock request:', e);
+    alert('Failed to approve unlock request.');
   }
-  
-  function startInactivityTimer() {
-    resetInactivityTimer();
+}
+
+// ====================== REJECT UNLOCK REQUEST FUNCTION ======================
+async function rejectUnlockRequest(reqId) {
+  if (!isSuperAdmin) {
+    alert('Only Super Admin can reject unlock requests.');
+    return;
   }
-  
-  function stopInactivityTimer() {
-    clearTimeout(inactivityTimeout);
+  if (!reqId) return;
+  try {
+    await update(ref(db, `unlock_requests/${reqId}`), { status: 'Rejected' });
+    alert(`Unlock request '${reqId}' rejected.`);
+  } catch (e) {
+    console.error('Failed to reject unlock request:', e);
+    alert('Failed to reject unlock request.');
   }
-  
-  ['mousemove', 'keydown', 'mousedown', 'touchstart'].forEach(evt => {
-    window.addEventListener(evt, resetInactivityTimer, true);
-  });
-  
-  // ============================================================
-  // Expose to Window
-  // ============================================================
-  window.login = login;
-  window.logout = logout;
-  window.showTab = showTab;
-  window.createAdmin = createAdmin;
-  window.changeSuperAdminUsername = changeSuperAdminUsername;
-  window.changeSuperAdminPassword = changeSuperAdminPassword;
-  window.requestSuperAdminUnlock = requestSuperAdminUnlock;
+}
+
+// ====================== DELETE STUDENT FUNCTION ======================
+async function deleteStudent(studentId) {
+  if (!isAuthenticated) {
+    alert('You must be logged in to delete students.');
+    return;
+  }
+  if (!studentId) return;
+  try {
+    await remove(ref(db, `students/${studentId}`));
+    alert('Student deleted successfully.');
+  } catch (e) {
+    console.error('Failed to delete student:', e);
+    alert('Failed to delete student.');
+  }
+}
+
+// ====================== DELETE VISITOR FUNCTION ======================
+async function deleteVisitor(visitorId) {
+  if (!isAuthenticated) {
+    alert('You must be logged in to delete visitors.');
+    return;
+  }
+  if (!visitorId) return;
+  try {
+    await remove(ref(db, `visitors/${visitorId}`));
+    alert('Visitor deleted successfully.');
+  } catch (e) {
+    console.error('Failed to delete visitor:', e);
+    alert('Failed to delete visitor.');
+  }
+}
+
+// ====================== UPDATE SUPER ADMIN DISPLAY ======================
+function updateSuperAdminDisplay() {
+  // Display current username in Super Admin Settings tab
+  const usernameEl = document.getElementById('display-username');
+  if (usernameEl) {
+    usernameEl.textContent = currentUsername || '';
+  }
+  // Also update the input in the change-username form
+  const currentUsernameInput = document.getElementById('current-username');
+  if (currentUsernameInput) {
+    currentUsernameInput.value = currentUsername || '';
+  }
+}
+
+// ====================== AUTO LOGOUT SESSION ======================
+let inactivityTimeout = null;
+let lastActivityTime = Date.now();
+
+function getAutoLogoutDuration() {
+  // 4 seconds for superadmin, 30 seconds for admin
+  return isSuperAdmin ? 4000 : 30000;
+}
+
+function resetInactivityTimer() {
+  clearTimeout(inactivityTimeout);
+  lastActivityTime = Date.now();
+  if (isAuthenticated) {
+    inactivityTimeout = setTimeout(() => {
+      alert('Session expired due to inactivity. You will be logged out.');
+      logout();
+    }, getAutoLogoutDuration());
+  }
+}
+
+// Listen for user activity
+['mousemove', 'keydown', 'mousedown', 'touchstart'].forEach(evt => {
+  window.addEventListener(evt, resetInactivityTimer, true);
+});
+
+// Start timer after login
+function startInactivityTimer() {
+  resetInactivityTimer();
+}
+
+// Stop timer on logout
+function stopInactivityTimer() {
+  clearTimeout(inactivityTimeout);
+}

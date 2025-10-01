@@ -48,6 +48,11 @@ let roleChartInstance = null;
 let timeChartInstance = null;
 let dateChartInstance = null;
 
+let loginAttempts = 0;
+let loginLockoutUntil = null;
+const MAX_LOGIN_ATTEMPTS = 3;
+const LOCKOUT_DURATION = 30000;
+
 const studentsRef = ref(db, "students");
 const visitorsRef = ref(db, "visitors");
 const unlockReqsRef = ref(db, "unlock_requests");
@@ -73,15 +78,38 @@ async function login(event) {
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value.trim();
   const errorEl = document.getElementById("login-error");
+  const unlockBtn = document.getElementById("request-superadmin-btn");
+  const statusEl = document.getElementById("sa-request-status");
 
   errorEl.classList.add("hidden");
+  if (unlockBtn) unlockBtn.classList.add("hidden");
+  if (statusEl) statusEl.classList.add("hidden");
+
+  // Check if user is locked out
+  if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
+    const remainingTime = Math.ceil((loginLockoutUntil - Date.now()) / 1000);
+    errorEl.textContent = `Account locked. Please wait ${remainingTime} seconds or request Super Admin unlock.`;
+    errorEl.classList.remove("hidden");
+    
+    // Show unlock request button
+    if (unlockBtn) unlockBtn.classList.remove("hidden");
+    
+    return;
+  }
+
+  // Reset lockout if time has passed
+  if (loginLockoutUntil && Date.now() >= loginLockoutUntil) {
+    loginAttempts = 0;
+    loginLockoutUntil = null;
+    if (unlockBtn) unlockBtn.classList.add("hidden");
+  }
 
   try {
     console.log('Login attempt:', { username, password });
     const hashed = await sha256(password);
     console.log('Hashed password:', hashed);
 
-    // Check super admin (support hashed or plaintext storage)
+    // Check super admin
     const saSnap = await get(superAdminRef);
     const saData = saSnap.val();
     console.log('Super admin data from Firebase:', saData);
@@ -90,7 +118,13 @@ async function login(event) {
       && saData.username === username
       && (saPass === hashed || saPass === password);
     console.log('Super admin match:', isSaMatch);
+    
     if (isSaMatch) {
+      // Reset login attempts on successful login
+      loginAttempts = 0;
+      loginLockoutUntil = null;
+      if (unlockBtn) unlockBtn.classList.add("hidden");
+      
       isSuperAdmin = true;
       currentUsername = username;
       document.getElementById("login-section").classList.add("hidden");
@@ -105,7 +139,7 @@ async function login(event) {
       return;
     }
 
-    // Check regular admins (case-insensitive username, support hashed/plain fields)
+    // Check regular admins
     const adminSnap = await get(adminsRef);
     const admins = adminSnap.val() || {};
     console.log('Admins data from Firebase:', admins);
@@ -115,7 +149,13 @@ async function login(event) {
     const adminPass = adminRecord?.passwordHash || adminRecord?.password;
     const isAdminMatch = adminRecord && (adminPass === hashed || adminPass === password);
     console.log('Admin match:', isAdminMatch);
+    
     if (isAdminMatch) {
+      // Reset login attempts on successful login
+      loginAttempts = 0;
+      loginLockoutUntil = null;
+      if (unlockBtn) unlockBtn.classList.add("hidden");
+      
       currentUsername = usernameKey;
       document.getElementById("login-section").classList.add("hidden");
       document.getElementById("dashboard").classList.remove("hidden");
@@ -125,8 +165,24 @@ async function login(event) {
       return;
     }
 
-    errorEl.textContent = "Invalid credentials.";
-    errorEl.classList.remove("hidden");
+    // Failed login attempt
+    loginAttempts++;
+    console.log(`Failed login attempt ${loginAttempts}/${MAX_LOGIN_ATTEMPTS}`);
+
+    if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+      loginLockoutUntil = Date.now() + LOCKOUT_DURATION;
+      errorEl.textContent = `Too many failed attempts. Account locked for ${LOCKOUT_DURATION / 1000} seconds.`;
+      errorEl.classList.remove("hidden");
+      
+      // Show unlock request button
+      if (unlockBtn) unlockBtn.classList.remove("hidden");
+      
+      console.log('Account locked until:', new Date(loginLockoutUntil));
+    } else {
+      const attemptsLeft = MAX_LOGIN_ATTEMPTS - loginAttempts;
+      errorEl.textContent = `Invalid credentials. ${attemptsLeft} attempt(s) remaining.`;
+      errorEl.classList.remove("hidden");
+    }
 
   } catch (err) {
     console.error("Login error:", err);
@@ -134,7 +190,6 @@ async function login(event) {
     errorEl.classList.remove("hidden");
   }
 }
-
 // Expose to HTML
 window.login = login;
 
@@ -171,6 +226,14 @@ async function sha256(text) {
   }
   if (window.sha256) return window.sha256(text);
   throw new Error("No SHA-256 available");
+}
+
+function requireSuperAdmin() {
+  if (!isSuperAdmin) {
+    alert('Only Super Admin can perform this action.');
+    return false;
+  }
+  return true;
 }
 
 // ============================================================
@@ -1040,5 +1103,4 @@ function startInactivityTimer() {
 function stopInactivityTimer() {
   clearTimeout(inactivityTimeout);
 }
-
 

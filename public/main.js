@@ -1118,3 +1118,45 @@ function stopInactivityTimer() {
   clearTimeout(inactivityTimeout);
 }
 
+// ====================== CREATE ADMIN FUNCTION ======================
+async function createAdmin(event) {
+  event.preventDefault();
+  if (!isSuperAdmin) {
+    alert("Only Super Admin can create admins.");
+    return;
+  }
+
+  const username = document.getElementById("new-admin-username").value.trim();
+  const password = document.getElementById("new-admin-password").value.trim();
+
+  if (!username || !password) {
+    alert("Please provide both username and password.");
+    return;
+  }
+
+  try {
+    const hashedPassword = await sha256(password);
+
+    // Save to Firebase under admins/
+    await set(ref(db, `admins/${username}`), {
+      passwordHash: hashedPassword,
+      createdAt: Date.now()
+    });
+
+    alert(`Admin '${username}' created successfully.`);
+    
+    // Clear form
+    document.getElementById("new-admin-username").value = "";
+    document.getElementById("new-admin-password").value = "";
+
+    // Refresh admin table
+    const adminSnap = await get(adminsRef);
+    populateAdmins(adminSnap.val() || {});
+  } catch (e) {
+    console.error("Failed to create admin:", e);
+    alert("Failed to create admin: " + e.message);
+  }
+}
+
+// Expose to HTML
+window.createAdmin = createAdmin;

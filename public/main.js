@@ -743,7 +743,7 @@ function aggregateByRole(items) {
 function aggregateByHour(items) {
   const counts = {};
   for (const it of items) {
-    const ts = coerceTimestamp(it.timestamp || it.time || it.date || it.dateTime);
+    const ts = coerceTimestamp(it.visit_time || it.timestamp || it.time || it.date || it.dateTime);
     if (ts == null) continue;
     const hour = new Date(ts).getHours().toString().padStart(2, '0');
     counts[hour] = (counts[hour] || 0) + 1;
@@ -1160,5 +1160,6 @@ async function createAdmin(event) {
 window.createAdmin = createAdmin;
 window.changeSuperAdminUsername = changeSuperAdminUsername;
 window.changeSuperAdminPassword = changeSuperAdminPassword;
+
 
 

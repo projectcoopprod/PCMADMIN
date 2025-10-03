@@ -558,8 +558,8 @@ function refreshUI() {
         tr.innerHTML = `
           <td class="py-3 px-6">${escapeHtml(item.nickname || item.name || item.fullname || "—")}</td>
           <td class="py-3 px-6">${escapeHtml(item.location || item.address || "—")}</td>
-          <td class="py-3 px-6">${fmtTime(item.timestamp || item.time || item.dateTime)}</td>
-          <td class="py-3 px-6">${fmtDate(item.timestamp || item.time || item.dateTime)}</td>
+          <td class="py-3 px-6">${fmtTime(item.visit_time || item.timestamp || item.time || item.dateTime)}</td>
+          <td class="py-3 px-6">${fmtDate(item.visit_time || item.timestamp || item.time || item.dateTime)}</td>
           <td class="py-3 px-6"><span class="text-slate-400 text-xs">—</span></td>`;
         // Add delete button for visitors
         const tdAction = tr.querySelector('td:last-child');
@@ -1160,6 +1160,7 @@ async function createAdmin(event) {
 window.createAdmin = createAdmin;
 window.changeSuperAdminUsername = changeSuperAdminUsername;
 window.changeSuperAdminPassword = changeSuperAdminPassword;
+
 
 
 

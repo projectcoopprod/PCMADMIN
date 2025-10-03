@@ -775,7 +775,7 @@ function populateAdmins(data) {
     tdUser.className = "py-3 px-6";
     tdUser.textContent = username;
 
-    const tdCreated =const tdCreated = document.createElement("td");
+    const tdCreated = document.createElement("td");
     tdCreated.className = "py-3 px-6";
     tdCreated.textContent = adminData.createdAt
       ? new Date(adminData.createdAt).toLocaleString()
@@ -1160,3 +1160,4 @@ async function createAdmin(event) {
 window.createAdmin = createAdmin;
 window.changeSuperAdminUsername = changeSuperAdminUsername;
 window.changeSuperAdminPassword = changeSuperAdminPassword;
+

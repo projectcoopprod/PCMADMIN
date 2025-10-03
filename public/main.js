@@ -21,7 +21,6 @@ const firebaseConfig = {
 
 // ============================================================
 // Initialize Firebase
-
 // ============================================================
 let app, db, auth;
 try {
@@ -71,7 +70,6 @@ function updateConnectionStatus(message, color) {
 }
 
 // Login Functions
-
 async function login(event) {
   event.preventDefault();
 
@@ -193,7 +191,6 @@ async function login(event) {
 // Expose to HTML
 window.login = login;
 
-
 function hideLoadingScreen() {
   document.getElementById("loading-screen")?.classList.add("hidden");
   document.getElementById("login-section")?.classList.remove("hidden");
@@ -264,11 +261,6 @@ function initializeSecureAuth() {
 // ============================================================
 // Database Listeners
 // ============================================================
-// Replace the unlock request listener section in your main.js with this:
-
-// ============================================================
-// Database Listeners (UPDATED SECTION)
-// ============================================================
 function initializeDatabaseListeners() {
   onValue(studentsRef, (snapshot) => {
     const data = snapshot.val() || {};
@@ -284,72 +276,71 @@ function initializeDatabaseListeners() {
     refreshUI();
   });
 
-  // FIXED: Unlock requests listener with real-time unlock
-  // FIXED: Unlock requests listener with real-time unlock AND auto-login
-onValue(unlockReqsRef, (snapshot) => {
-  const data = snapshot.val() || {};
-  populateUnlockRequests(data);
-  
-  // Check if current locked-out user has been approved
-  if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
-    const currentUser = document.getElementById("username")?.value?.trim();
-    const currentPass = document.getElementById("password")?.value?.trim();
+  // Unlock requests listener with real-time unlock AND auto-login
+  onValue(unlockReqsRef, (snapshot) => {
+    const data = snapshot.val() || {};
+    populateUnlockRequests(data);
     
-    if (currentUser) {
-      // Find any approved request for this user
-      const approvedRequest = Object.entries(data).find(
-        ([reqId, req]) => 
-          req.username === currentUser && 
-          req.status === 'Approved' &&
-          req.requestedAt > (Date.now() - 300000) // Within last 5 minutes
-      );
+    // Check if current locked-out user has been approved
+    if (loginLockoutUntil && Date.now() < loginLockoutUntil) {
+      const currentUser = document.getElementById("username")?.value?.trim();
+      const currentPass = document.getElementById("password")?.value?.trim();
       
-      if (approvedRequest) {
-        // Unlock the user immediately
-        loginAttempts = 0;
-        loginLockoutUntil = null;
+      if (currentUser) {
+        // Find any approved request for this user
+        const approvedRequest = Object.entries(data).find(
+          ([reqId, req]) => 
+            req.username === currentUser && 
+            req.status === 'Approved' &&
+            req.requestedAt > (Date.now() - 300000) // Within last 5 minutes
+        );
         
-        const errorEl = document.getElementById("login-error");
-        if (errorEl) {
-          errorEl.textContent = '✓ Your account has been unlocked! Logging you in...';
-          errorEl.classList.remove("hidden");
-          errorEl.classList.remove('bg-red-900', 'text-red-200');
-          errorEl.classList.add('bg-green-900', 'text-green-200');
-        }
-        
-        const statusEl = document.getElementById('sa-request-status');
-        if (statusEl) {
-          statusEl.textContent = '✓ Approved! Logging you in...';
-          statusEl.classList.add('text-green-400');
-          statusEl.classList.remove('hidden');
-        }
-        
-        // Hide unlock button
-        const unlockBtn = document.getElementById("request-superadmin-btn");
-        if (unlockBtn) unlockBtn.classList.add("hidden");
-        
-        console.log('User unlocked via Super Admin approval - auto-logging in');
-        
-        // AUTO-LOGIN: Trigger login after 1 second
-        setTimeout(async () => {
-          if (currentPass) {
-            // Simulate login button click with the stored credentials
-            const loginEvent = new Event('submit', { cancelable: true, bubbles: true });
-            const loginForm = document.querySelector('#login-section form');
-            if (loginForm) {
-              loginForm.dispatchEvent(loginEvent);
-            }
-          } else {
-            // If no password stored, just show success message
-            if (errorEl) {
-              errorEl.textContent = '✓ Account unlocked! Please enter your password and login.';
-            }
+        if (approvedRequest) {
+          // Unlock the user immediately
+          loginAttempts = 0;
+          loginLockoutUntil = null;
+          
+          const errorEl = document.getElementById("login-error");
+          if (errorEl) {
+            errorEl.textContent = '✓ Your account has been unlocked! Logging you in...';
+            errorEl.classList.remove("hidden");
+            errorEl.classList.remove('bg-red-900', 'text-red-200');
+            errorEl.classList.add('bg-green-900', 'text-green-200');
           }
-        }, 1000);
+          
+          const statusEl = document.getElementById('sa-request-status');
+          if (statusEl) {
+            statusEl.textContent = '✓ Approved! Logging you in...';
+            statusEl.classList.add('text-green-400');
+            statusEl.classList.remove('hidden');
+          }
+          
+          // Hide unlock button
+          const unlockBtn = document.getElementById("request-superadmin-btn");
+          if (unlockBtn) unlockBtn.classList.add("hidden");
+          
+          console.log('User unlocked via Super Admin approval - auto-logging in');
+          
+          // AUTO-LOGIN: Trigger login after 1 second
+          setTimeout(async () => {
+            if (currentPass) {
+              // Simulate login button click with the stored credentials
+              const loginEvent = new Event('submit', { cancelable: true, bubbles: true });
+              const loginForm = document.querySelector('#login-section form');
+              if (loginForm) {
+                loginForm.dispatchEvent(loginEvent);
+              }
+            } else {
+              // If no password stored, just show success message
+              if (errorEl) {
+                errorEl.textContent = '✓ Account unlocked! Please enter your password and login.';
+              }
+            }
+          }, 1000);
+        }
       }
     }
-  }
-});
+  });
 
   onValue(adminSessionsRef, (snapshot) => {
     populateAdminSessions(snapshot.val() || {});
@@ -361,7 +352,7 @@ onValue(unlockReqsRef, (snapshot) => {
 }
 
 // ============================================================
-// UPDATED: Approve Unlock Request Function
+// Approve Unlock Request Function
 // ============================================================
 async function approveUnlockRequest(reqId) {
   if (!requireSuperAdmin()) return;
@@ -399,7 +390,7 @@ async function approveUnlockRequest(reqId) {
 }
 
 // ============================================================
-// UPDATED: Reject Unlock Request Function
+// Reject Unlock Request Function
 // ============================================================
 async function rejectUnlockRequest(reqId) {
   if (!requireSuperAdmin()) return;
@@ -426,7 +417,7 @@ async function rejectUnlockRequest(reqId) {
 }
 
 // ============================================================
-// UPDATED: Request Super Admin Unlock Function
+// Request Super Admin Unlock Function
 // ============================================================
 async function requestSuperAdminUnlock() {
   const username = document.getElementById('username').value.trim();
@@ -661,11 +652,11 @@ function logout() {
 }
 
 // ============================================================
-// Charts (Chart.js)
+// Charts (Chart.js) - FIXED VERSION
 // ============================================================
 function renderCharts() {
-  // Only include visitors for the role chart
-  const byRole = aggregateByRole(combinedData.filter(x => x._roleNorm === 'visitor'));
+  // FIXED: Include both students and visitors for the role chart
+  const byRole = aggregateByRole(combinedData);
   const byHour = aggregateByHour(combinedData);
   const byDay = aggregateByDay(combinedData);
 
@@ -733,10 +724,17 @@ function coerceTimestamp(value) {
   return Number.isNaN(d.getTime()) ? null : d.getTime();
 }
 
+// FIXED: Improved aggregateByRole function
 function aggregateByRole(items) {
   const counts = {};
   for (const it of items) {
-    const role = it.role || it._roleNorm || 'visitor';
+    // Check _roleNorm first, then fallback to role, then use _path as last resort
+    let role = it._roleNorm || it.role;
+    if (!role && it._path) {
+      role = it._path === 'students' ? 'student' : 'visitor';
+    }
+    if (!role) role = 'unknown';
+    
     counts[role] = (counts[role] || 0) + 1;
   }
   return counts;
@@ -777,7 +775,7 @@ function populateAdmins(data) {
     tdUser.className = "py-3 px-6";
     tdUser.textContent = username;
 
-    const tdCreated = document.createElement("td");
+    const tdCreated =const tdCreated = document.createElement("td");
     tdCreated.className = "py-3 px-6";
     tdCreated.textContent = adminData.createdAt
       ? new Date(adminData.createdAt).toLocaleString()
@@ -844,7 +842,7 @@ function populateUnlockRequests(data) {
   }
 
   // Attach approve/reject event listeners after populating unlock requests
- const rows = tbody.querySelectorAll('tr');
+  const rows = tbody.querySelectorAll('tr');
   Object.keys(data).forEach((reqId, idx) => {
     const approveBtn = rows[idx]?.querySelector('button:nth-child(1)');
     const rejectBtn = rows[idx]?.querySelector('button:nth-child(2)');
@@ -899,8 +897,8 @@ function populateAdminSessions(data) {
   }
 }
 
- // Super Admin Settings Functions
- async function changeSuperAdminUsername(event) {
+// Super Admin Settings Functions
+async function changeSuperAdminUsername(event) {
   event.preventDefault();
   if (!requireSuperAdmin()) return;
   
@@ -1160,3 +1158,5 @@ async function createAdmin(event) {
 
 // Expose to HTML
 window.createAdmin = createAdmin;
+window.changeSuperAdminUsername = changeSuperAdminUsername;
+window.changeSuperAdminPassword = changeSuperAdminPassword;

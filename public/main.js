@@ -342,6 +342,25 @@ function initializeDatabaseListeners() {
     }
   });
 
+  // Additional periodic check every 5 seconds for deleted admin accounts
+  setInterval(() => {
+    if (!isSuperAdmin && isAuthenticated && currentUsername) {
+      get(adminsRef).then((snapshot) => {
+        const admins = snapshot.val() || {};
+        const adminExists = Object.keys(admins).some(
+          key => key.toLowerCase() === currentUsername.toLowerCase()
+        );
+        
+        if (!adminExists) {
+          alert('Your admin account has been deleted by Super Admin. You will be logged out.');
+          logout();
+        }
+      }).catch(err => {
+        console.error('Error checking admin existence:', err);
+      });
+    }
+  }, 5000);
+
   onValue(adminSessionsRef, (snapshot) => {
     populateAdminSessions(snapshot.val() || {});
   });
@@ -1174,3 +1193,4 @@ async function createAdmin(event) {
 window.createAdmin = createAdmin;
 window.changeSuperAdminUsername = changeSuperAdminUsername;
 window.changeSuperAdminPassword = changeSuperAdminPassword;
+

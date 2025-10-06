@@ -346,8 +346,22 @@ function initializeDatabaseListeners() {
     populateAdminSessions(snapshot.val() || {});
   });
 
+  // FIXED: Admins listener with auto-logout check inside initializeDatabaseListeners()
   onValue(adminsRef, (snapshot) => {
-    populateAdmins(snapshot.val() || {});
+    const admins = snapshot.val() || {};
+    populateAdmins(admins);
+    
+    // Check if current logged-in admin still exists
+    if (!isSuperAdmin && isAuthenticated && currentUsername) {
+      const adminExists = Object.keys(admins).some(
+        key => key.toLowerCase() === currentUsername.toLowerCase()
+      );
+      
+      if (!adminExists) {
+        alert('Your admin account has been deleted by Super Admin. You will be logged out.');
+        logout();
+      }
+    }
   });
 }
 
@@ -1160,7 +1174,3 @@ async function createAdmin(event) {
 window.createAdmin = createAdmin;
 window.changeSuperAdminUsername = changeSuperAdminUsername;
 window.changeSuperAdminPassword = changeSuperAdminPassword;
-
-
-
-
